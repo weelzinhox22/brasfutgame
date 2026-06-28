@@ -1,0 +1,190 @@
+// Football Historic Championship System - Prisma Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// USERS & RANKING
+// ============================================================
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  avatarColor  String   @default("#16a34a")
+  country      String   @default("Brasil")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  rankings     UserRanking?
+  participations RoomParticipant[]
+  chatMessages ChatMessage[]
+}
+
+model UserRanking {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  username       String
+  country        String
+  wins           Int      @default(0)
+  draws          Int      @default(0)
+  losses         Int      @default(0)
+  goalsFor       Int      @default(0)
+  goalsAgainst   Int      @default(0)
+  championships  Int      @default(0)
+  points         Int      @default(0) // ranking points
+  matchesPlayed  Int      @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+// ============================================================
+// HISTORICAL TEAMS & PLAYERS
+// ============================================================
+
+model HistoricalTeam {
+  id          String   @id @default(cuid())
+  name        String
+  year        Int
+  country     String
+  league      String
+  ovr         Int
+  formation   String   @default("4-3-3")
+  decade      Int
+  badgeColor  String   @default("#1e3a8a")
+  accentColor String   @default("#fbbf24")
+  description String   @default("")
+  createdAt   DateTime @default(now())
+
+  players     HistoricalPlayer[]
+}
+
+model HistoricalPlayer {
+  id         String   @id @default(cuid())
+  name       String
+  position   String
+  overall    Int
+  country    String
+  club       String
+  year       Int
+  decade     Int
+  photoColor String   @default("#475569")
+  stats      String   @default("{}") // JSON: pace, shooting, passing, dribbling, defending, physical
+  teamId     String?
+  team       HistoricalTeam? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+}
+
+// ============================================================
+// ROOMS (private matches)
+// ============================================================
+
+model Room {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  hostId     String
+  password   String?  // optional
+  status     String   @default("waiting") // waiting | draft | playing | finished
+  settings   String   @default("{}") // JSON: teamFilter, botCount, simSpeed, rounds, botMode
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  participants RoomParticipant[]
+  matches      Match[]
+  standings    ChampionshipStanding[]
+  chatMessages ChatMessage[]
+}
+
+model RoomParticipant {
+  id         String   @id @default(cuid())
+  roomId     String
+  userId     String?
+  username   String
+  isBot      Boolean  @default(false)
+  botMode    String?  // weak | balanced | favorable | competitive
+  isHost     Boolean  @default(false)
+  joinedAt   DateTime @default(now()) // used for host migration priority
+  teamName   String?  // chosen during draft
+  teamOvr    Int      @default(0)
+  squad      String   @default("[]") // JSON array of picked player ids
+
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([roomId, userId])
+}
+
+model ChatMessage {
+  id         String   @id @default(cuid())
+  roomId     String
+  userId     String?
+  username   String
+  content    String
+  type       String   @default("user") // user | system | bot
+  createdAt  DateTime @default(now())
+
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// ============================================================
+// CHAMPIONSHIP
+// ============================================================
+
+model Match {
+  id                 String   @id @default(cuid())
+  roomId             String
+  round              Int
+  homeParticipantId  String
+  awayParticipantId  String
+  homeName           String
+  awayName           String
+  homeOvr            Int      @default(0)
+  awayOvr            Int      @default(0)
+  homeScore          Int      @default(0)
+  awayScore          Int      @default(0)
+  events             String   @default("[]") // JSON: goals, cards, injuries, subs
+  stats              String   @default("{}") // JSON: possession, shots, etc
+  played             Boolean  @default(false)
+  playedAt           DateTime?
+
+  room               Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model ChampionshipStanding {
+  id             String   @id @default(cuid())
+  roomId         String
+  participantId  String
+  name           String
+  played         Int      @default(0)
+  won            Int      @default(0)
+  drawn          Int      @default(0)
+  lost           Int      @default(0)
+  goalsFor       Int      @default(0)
+  goalsAgainst   Int      @default(0)
+  goalDifference Int      @default(0)
+  points         Int      @default(0)
+
+  room           Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, participantId])
+}
+
+// ============================================================
+// ACHIEVEMENTS & SEASONS
+// ============================================================
+
+model Achievement {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String
+  title       String
+  description String
+  unlockedAt  DateTime @default(now())
+}
