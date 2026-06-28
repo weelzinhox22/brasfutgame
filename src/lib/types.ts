@@ -44,6 +44,15 @@ export const SIM_SPEEDS = [
 
 export type SimSpeed = (typeof SIM_SPEEDS)[number]["value"];
 
+// Competition formats
+export const COMPETITION_FORMATS = [
+  { value: "custom", label: "Personalizado", description: "N rodadas (turno e returno)" },
+  { value: "brasileirao", label: "Brasileirão", description: "20 times · 38 rodadas (turno e returno)" },
+  { value: "ucl-2026", label: "UCL 2026", description: "Fase de liga + mata-mata (modelo UEFA 2026)" },
+] as const;
+
+export type CompetitionFormat = (typeof COMPETITION_FORMATS)[number]["value"];
+
 export interface PlayerStats {
   pace: number;
   shooting: number;
@@ -88,6 +97,9 @@ export interface RoomSettings {
   rounds: number;
   botMode: BotMode;
   maxPlayers: number;
+  competitionFormat: CompetitionFormat;
+  hideOvr: boolean; // hide OVR on draft cards, show only names
+  privatePicks: boolean; // hide picked cards from other players
 }
 
 export const DEFAULT_SETTINGS: RoomSettings = {
@@ -96,8 +108,19 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   simSpeed: "normal",
   rounds: 1,
   botMode: "balanced",
-  maxPlayers: 12,
+  maxPlayers: 20,
+  competitionFormat: "custom",
+  hideOvr: false,
+  privatePicks: false,
 };
+
+// Compute number of rounds based on format + participant count
+export function computeRounds(format: CompetitionFormat, participantCount: number): number {
+  if (format === "brasileirao") return Math.max(2, (participantCount - 1) * 2); // double round-robin
+  if (format === "ucl-2026") return 8; // league phase: 8 matches per team
+  // custom: respect settings.rounds
+  return Math.max(1, Math.min(participantCount - 1, 3));
+}
 
 export interface RoomParticipant {
   id: string;

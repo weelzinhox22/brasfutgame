@@ -9,6 +9,7 @@ import type {
   ChampionshipStanding,
   HistoricalPlayer,
   Position,
+  PlayerStats,
   AppView,
 } from '@/lib/types'
 
@@ -20,7 +21,16 @@ export interface DraftOption {
   country: string
   club: string
   year: number
+  decade: number
   photoColor: string
+  stats: PlayerStats
+}
+
+export interface DraftSquad {
+  id: string
+  username: string
+  formation: string
+  squad: HistoricalPlayer[]
 }
 
 export interface DraftStateUI {
@@ -34,6 +44,9 @@ export interface DraftStateUI {
   lastRoll: number | null
   currentOptions: DraftOption[]
   squadCounts: { id: string; count: number; positions: Position[] }[]
+  squads: DraftSquad[]
+  hideOvr?: boolean
+  privatePicks?: boolean
 }
 
 export interface MatchSlotUI {
@@ -122,7 +135,10 @@ const initialState = {
     simSpeed: 'normal' as const,
     rounds: 1,
     botMode: 'balanced' as const,
-    maxPlayers: 12,
+    maxPlayers: 20,
+    competitionFormat: 'custom' as const,
+    hideOvr: false,
+    privatePicks: false,
   } as RoomSettings,
   status: 'waiting' as const,
   participants: [] as RoomParticipant[],
@@ -159,3 +175,13 @@ export const useGameStore = create<GameStore>((set) => ({
   setSquads: (s) => set({ squads: s }),
   reset: () => set({ ...initialState }),
 }))
+
+// Debug helper (temporary)
+if (typeof window !== 'undefined') {
+  ;(window as any).__gameStore = useGameStore
+}
+
+// Debug helper (temporary)
+if (typeof window !== 'undefined') {
+  ;(window as any).__gameStore = useGameStore
+}

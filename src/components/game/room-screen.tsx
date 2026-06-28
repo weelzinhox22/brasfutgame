@@ -13,6 +13,7 @@ import { Slider } from '@/components/ui/slider'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { useUserStore } from '@/store/user-store'
 import { useGameStore } from '@/store/game-store'
 import { SIM_SPEEDS, BOT_MODES, BOT_MODE_LABELS, type RoomSettings, type BotMode } from '@/lib/types'
@@ -151,7 +152,7 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                   <Label className="text-xs">Adicionar bots</Label>
                   <span className="text-sm font-bold text-emerald-400">{game.settings.botCount}</span>
                 </div>
-                <Slider value={[game.settings.botCount]} min={1} max={11} step={1} onValueChange={([v]) => updateSettings({ botCount: v })} />
+                <Slider value={[game.settings.botCount]} min={1} max={19} step={1} onValueChange={([v]) => updateSettings({ botCount: v })} />
                 <Button variant="secondary" className="w-full" size="sm" onClick={addBots}>
                   <UserPlus className="mr-1 h-4 w-4" /> Adicionar {game.settings.botCount} bot(s)
                 </Button>
@@ -169,6 +170,17 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5 col-span-2">
+                <Label className="text-xs">Formato da competição</Label>
+                <Select value={game.settings.competitionFormat} onValueChange={(v) => updateSettings({ competitionFormat: v as any })} disabled={!isHost}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="custom">Personalizado</SelectItem>
+                    <SelectItem value="brasileirao">Brasileirão (38 rodadas)</SelectItem>
+                    <SelectItem value="ucl-2026">UCL 2026 (liga + mata-mata)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Times permitidos</Label>
                 <Select value={game.settings.teamFilter} onValueChange={(v) => updateSettings({ teamFilter: v as any })} disabled={!isHost}>
@@ -202,17 +214,37 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Turnos (idas e voltas)</Label>
-                <Select value={String(game.settings.rounds)} onValueChange={(v) => updateSettings({ rounds: parseInt(v) })} disabled={!isHost}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3].map((r) => (
-                      <SelectItem key={r} value={String(r)}>{r} turno(s)</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {game.settings.competitionFormat === 'custom' && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Turnos (idas e voltas)</Label>
+                  <Select value={String(game.settings.rounds)} onValueChange={(v) => updateSettings({ rounds: parseInt(v) })} disabled={!isHost}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3].map((r) => (
+                        <SelectItem key={r} value={String(r)}>{r} turno(s)</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {/* Draft visibility toggles */}
+            <div className="grid grid-cols-2 gap-2 border-t border-border/40 pt-3">
+              <label className="flex cursor-pointer items-center justify-between rounded-md border border-border/40 p-2">
+                <div>
+                  <p className="text-xs font-semibold">Ocultar OVR</p>
+                  <p className="text-[10px] text-muted-foreground">Só nomes nas cartas</p>
+                </div>
+                <Switch checked={game.settings.hideOvr} onCheckedChange={(v) => updateSettings({ hideOvr: v })} disabled={!isHost} />
+              </label>
+              <label className="flex cursor-pointer items-center justify-between rounded-md border border-border/40 p-2">
+                <div>
+                  <p className="text-xs font-semibold">Picks privados</p>
+                  <p className="text-[10px] text-muted-foreground">Esconder dos outros</p>
+                </div>
+                <Switch checked={game.settings.privatePicks} onCheckedChange={(v) => updateSettings({ privatePicks: v })} disabled={!isHost} />
+              </label>
             </div>
 
             <Separator />

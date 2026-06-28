@@ -60,7 +60,10 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
     simSpeed: 'normal',
     rounds: 1,
     botMode: 'balanced',
-    maxPlayers: 12,
+    maxPlayers: 20,
+    competitionFormat: 'custom',
+    hideOvr: false,
+    privatePicks: false,
   })
   const [creating, setCreating] = useState(false)
 
@@ -106,8 +109,15 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   }, [teamSearch, teamDecade])
 
   const handleCreate = async () => {
+    console.log('[handleCreate] start', { hasUser: !!user, userId: user?.id, roomName })
     setCreating(true)
     try {
+      if (!user?.id) {
+        console.log('[handleCreate] no user')
+        toast.error('Usuário não encontrado. Recarregue a página.')
+        return
+      }
+      console.log('[handleCreate] fetching...')
       const res = await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,13 +130,17 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
         }),
       })
       const data = await res.json()
+      console.log('[handleCreate] response', { ok: res.ok, code: data.code, error: data.error })
       if (!res.ok) throw new Error(data.error)
       // join via socket
+      console.log('[handleCreate] emitting room:join')
       emit('room:join', { code: data.code, userId: user.id, username: user.username, password: password || undefined })
       setCreateOpen(false)
+      console.log('[handleCreate] setView room')
       setView('room')
       toast.success(`Sala ${data.code} criada!`)
     } catch (e: any) {
+      console.error('[handleCreate] error', e)
       toast.error(e.message || 'Erro ao criar sala.')
     } finally {
       setCreating(false)
@@ -158,7 +172,7 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   }
 
   const fillBots = () => {
-    setSettings((s) => ({ ...s, botCount: Math.max(2, 12 - 1) }))
+    setSettings((s) => ({ ...s, botCount: 19 }))
   }
 
   return (
@@ -192,6 +206,17 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                   <p className="text-sm font-semibold">Configurações</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
+                      <Label className="text-xs">Formato da competição</Label>
+                      <Select value={settings.competitionFormat} onValueChange={(v) => setSettings((s) => ({ ...s, competitionFormat: v as any }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="custom">Personalizado</SelectItem>
+                          <SelectItem value="brasileirao">Brasileirão (38 rodadas)</SelectItem>
+                          <SelectItem value="ucl-2026">UCL 2026 (liga + mata-mata)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
                       <Label className="text-xs">Times</Label>
                       <Select value={settings.teamFilter} onValueChange={(v) => setSettings((s) => ({ ...s, teamFilter: v as any }))}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -224,27 +249,45 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Rodadas</Label>
-                      <Select value={String(settings.rounds)} onValueChange={(v) => setSettings((s) => ({ ...s, rounds: parseInt(v) }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {[1, 2, 3].map((r) => (
-                            <SelectItem key={r} value={String(r)}>{r} turno(s)</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {settings.competitionFormat === 'custom' && (
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Rodadas (turnos)</Label>
+                        <Select value={String(settings.rounds)} onValueChange={(v) => setSettings((s) => ({ ...s, rounds: parseInt(v) }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {[1, 2, 3].map((r) => (
+                              <SelectItem key={r} value={String(r)}>{r} turno(s)</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs">Quantidade inicial de bots</Label>
                       <span className="text-sm font-bold text-emerald-400">{settings.botCount}</span>
                     </div>
-                    <Slider value={[settings.botCount]} min={0} max={11} step={1} onValueChange={([v]) => setSettings((s) => ({ ...s, botCount: v }))} />
+                    <Slider value={[settings.botCount]} min={0} max={19} step={1} onValueChange={([v]) => setSettings((s) => ({ ...s, botCount: v }))} />
                     <Button variant="ghost" size="sm" onClick={fillBots} className="h-7 text-xs">
-                      <Shuffle className="mr-1 h-3 w-3" /> Preencher (11 bots)
+                      <Shuffle className="mr-1 h-3 w-3" /> Preencher (19 bots)
                     </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 border-t border-border/40 pt-3">
+                    <label className="flex cursor-pointer items-center justify-between rounded-md border border-border/40 p-2">
+                      <div>
+                        <p className="text-xs font-semibold">Ocultar OVR</p>
+                        <p className="text-[10px] text-muted-foreground">Mostrar só nomes nas cartas</p>
+                      </div>
+                      <Switch checked={settings.hideOvr} onCheckedChange={(v) => setSettings((s) => ({ ...s, hideOvr: v }))} />
+                    </label>
+                    <label className="flex cursor-pointer items-center justify-between rounded-md border border-border/40 p-2">
+                      <div>
+                        <p className="text-xs font-semibold">Picks privados</p>
+                        <p className="text-[10px] text-muted-foreground">Esconder cartas dos outros</p>
+                      </div>
+                      <Switch checked={settings.privatePicks} onCheckedChange={(v) => setSettings((s) => ({ ...s, privatePicks: v }))} />
+                    </label>
                   </div>
                 </div>
               </div>

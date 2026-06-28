@@ -275,16 +275,19 @@ function neededPositions(squad: HistoricalPlayer[], formation: string): Position
 function generateOptions(available: HistoricalPlayer[], squad: HistoricalPlayer[], formation: string, roll: number): HistoricalPlayer[] {
   const needed = neededPositions(squad, formation)
   // roll 1-6: higher roll => access to higher-overall players
-  // options pool: prefer needed positions, overall ceiling depends on roll
   const ceil = 60 + roll * 6 // roll1->66, roll6->96
   const floor = Math.max(50, ceil - 18)
 
-  let pool = available.filter((p) => p.overall <= ceil && p.overall >= floor)
-  // prefer needed positions
-  const neededPool = pool.filter((p) => needed.includes(p.position))
-  const otherPool = pool.filter((p) => !needed.includes(p.position))
+  const pool = available.filter((p) => p.overall <= ceil && p.overall >= floor)
 
-  // shuffle
+  // As needed positions get filled, progressively mix in OTHER positions.
+  // ratio of needed vs other options depends on how many slots remain unfilled.
+  const formationRoles = FORMATION_ROLES[formation] || FORMATION_ROLES['4-3-3']
+  const totalSlots = formationRoles.length // 11
+  const filledSlots = totalSlots - needed.length
+  const fillRatio = filledSlots / totalSlots // 0 at start -> 1 when full
+
+  // shuffle helper
   const sh = <T,>(arr: T[]) => {
     const a = [...arr]
     for (let i = a.length - 1; i > 0; i--) {
@@ -294,10 +297,24 @@ function generateOptions(available: HistoricalPlayer[], squad: HistoricalPlayer[
     return a
   }
 
-  const neededPicked = sh(neededPool).slice(0, 5)
-  const otherPicked = sh(otherPool).slice(0, 8 - neededPicked.length)
+  const neededPool = pool.filter((p) => needed.includes(p.position))
+  const otherPool = pool.filter((p) => !needed.includes(p.position))
+
+  // 8 options total. Early on, mostly needed. As squad fills, more "other".
+  // needed slots: max(2, round(6 * (1 - fillRatio)))  -> 6 at start, 2 near full, min 2
+  // If no needed positions remain (squad full), all 8 are "other" (bench).
+  let neededCount: number
+  if (needed.length === 0) {
+    neededCount = 0
+  } else {
+    neededCount = Math.max(2, Math.round(6 * (1 - fillRatio)))
+    neededCount = Math.min(neededCount, neededPool.length, 8)
+  }
+  const otherCount = Math.min(8 - neededCount, otherPool.length)
+
+  const neededPicked = sh(neededPool).slice(0, neededCount)
+  const otherPicked = sh(otherPool).slice(0, otherCount)
   const options = sh([...neededPicked, ...otherPicked])
-  // sort by overall desc for display
   return options.sort((a, b) => b.overall - a.overall)
 }
 
@@ -341,7 +358,7 @@ async function startDraft(io: Server, room: ActiveRoom) {
   await db.room.update({ where: { id: room.roomId }, data: { status: 'draft' } })
   const msg = systemMessage(room, 'Draft iniciado! Ordem sorteada. Cada participante rola o dado e escolhe 2 jogadores por turno.')
   pushChat(room, msg)
-  io.to(`room:${room.code}`).emit('draft:state', publicDraftState(room))
+  emitDraftState(io, room)
   io.to(`room:${room.code}`).emit('room:status-changed', { status: 'draft' })
   broadcastRoomState(io, room)
 
@@ -349,8 +366,11 @@ async function startDraft(io: Server, room: ActiveRoom) {
   await advanceDraftTurn(io, room)
 }
 
-function publicDraftState(room: ActiveRoom) {
+function publicDraftState(room: ActiveRoom, viewerParticipantId?: string) {
   const d = room.draft!
+  const currentId = d.order[d.currentTurnIndex]
+  // If privatePicks is on, only the current turn's participant sees the options
+  const hideOptions = room.settings.privatePicks && viewerParticipantId !== currentId
   return {
     roomId: room.roomId,
     order: d.order,
@@ -361,8 +381,32 @@ function publicDraftState(room: ActiveRoom) {
     picks: d.picks,
     status: d.status,
     lastRoll: d.lastRoll,
-    currentOptions: d.currentOptions.map((p) => ({ id: p.id, name: p.name, position: p.position, overall: p.overall, country: p.country, club: p.club, year: p.year, photoColor: p.photoColor })),
+    currentOptions: hideOptions
+      ? []
+      : d.currentOptions.map((p) => ({ id: p.id, name: p.name, position: p.position, overall: p.overall, country: p.country, club: p.club, year: p.year, decade: p.decade, photoColor: p.photoColor, stats: p.stats })),
     squadCounts: room.participants.map((p) => ({ id: p.id, count: p.squad.length, positions: p.squad.map((s) => s.position) })),
+    squads: room.participants.map((p) => ({
+      id: p.id,
+      username: p.username,
+      formation: p.formation,
+      squad: p.squad.map((s) => ({ id: s.id, name: s.name, position: s.position, overall: s.overall, country: s.country, club: s.club, year: s.year, decade: s.decade, photoColor: s.photoColor, stats: s.stats })),
+    })),
+    hideOvr: room.settings.hideOvr,
+    privatePicks: room.settings.privatePicks,
+  }
+}
+
+// Emit draft:state to each participant with their own view (handles privatePicks)
+function emitDraftState(io: Server, room: ActiveRoom) {
+  if (!room.settings.privatePicks) {
+    io.to(`room:${room.code}`).emit('draft:state', publicDraftState(room))
+    return
+  }
+  // Send personalized state to each connected participant
+  for (const p of room.participants) {
+    if (p.socketId) {
+      io.to(p.socketId).emit('draft:state', publicDraftState(room, p.id))
+    }
   }
 }
 
@@ -392,7 +436,7 @@ async function advanceDraftTurn(io: Server, room: ActiveRoom) {
     pickIndex: d.currentTurnIndex,
     isBot: participant.isBot,
   })
-  io.to(`room:${room.code}`).emit('draft:state', publicDraftState(room))
+  emitDraftState(io, room)
 
   if (participant.isBot) {
     // bot auto-plays after a short delay (for animation)
@@ -421,6 +465,8 @@ async function botDraftTurn(io: Server, room: ActiveRoom, participant: Participa
     participantId: participant.id,
     players: picks.map((p) => ({ id: p.id, name: p.name, position: p.position, overall: p.overall, country: p.country, club: p.club, year: p.year, photoColor: p.photoColor })),
   })
+  // emit updated state so all clients see the new squad
+  emitDraftState(io, room)
   await delay(800)
 
   // advance
@@ -465,7 +511,7 @@ async function finishDraft(io: Server, room: ActiveRoom) {
   io.to(`room:${room.code}`).emit('draft:complete', {
     squads: room.participants.map((p) => ({ id: p.id, username: p.username, teamName: p.teamName, teamOvr: p.teamOvr, formation: p.formation, squad: p.squad })),
   })
-  io.to(`room:${room.code}`).emit('draft:state', publicDraftState(room))
+  emitDraftState(io, room)
   broadcastRoomState(io, room)
 }
 
@@ -507,20 +553,42 @@ function generateRoundRobin(participants: ParticipantState[]): MatchSlot[][] {
 }
 
 async function startChampionship(io: Server, room: ActiveRoom) {
-  const schedule = generateRoundRobin(room.participants)
-  if (schedule.length === 0) {
+  const baseSchedule = generateRoundRobin(room.participants)
+  if (baseSchedule.length === 0) {
     const msg = systemMessage(room, 'Não há participantes suficientes com elenco completo para iniciar o campeonato.')
     pushChat(room, msg)
     io.to(`room:${room.code}`).emit('chat:message', msg)
     return
   }
 
-  // replicate rounds if settings.rounds > 1
-  let fullSchedule = schedule
-  if (room.settings.rounds > 1) {
-    fullSchedule = []
-    for (let i = 0; i < room.settings.rounds; i++) {
-      for (const round of schedule) {
+  // Build full schedule based on competition format
+  let fullSchedule: MatchSlot[][] = []
+  const format = room.settings.competitionFormat || 'custom'
+
+  if (format === 'brasileirao') {
+    // Full double round-robin: each team plays every other twice (home & away)
+    // = (n-1)*2 rounds. baseSchedule is single round-robin; replicate with home/away swap.
+    for (let i = 0; i < 2; i++) {
+      for (const round of baseSchedule) {
+        const r = round.map((m) => (i === 1 ? { ...m, homeId: m.awayId, awayId: m.homeId, homeName: m.awayName, awayName: m.homeName } : m))
+        fullSchedule.push(r)
+      }
+    }
+  } else if (format === 'ucl-2026') {
+    // UCL 2026 league phase: 36 teams, each plays 8 matches (4 home, 4 away) against a seeded draw.
+    // We approximate: take baseSchedule, pick 8 rounds total (or all if fewer), swap home/away for second half.
+    const totalRounds = Math.min(8, baseSchedule.length * 2)
+    for (let r = 0; r < totalRounds; r++) {
+      const baseRound = baseSchedule[r % baseSchedule.length]
+      const swap = r >= baseSchedule.length
+      const round = baseRound.map((m) => (swap ? { ...m, homeId: m.awayId, awayId: m.homeId, homeName: m.awayName, awayName: m.homeName } : m))
+      fullSchedule.push(round)
+    }
+  } else {
+    // custom: respect settings.rounds (1 = single, 2 = double, 3 = triple)
+    const rep = Math.max(1, Math.min(room.settings.rounds || 1, 3))
+    for (let i = 0; i < rep; i++) {
+      for (const round of baseSchedule) {
         const r = round.map((m) => (i % 2 === 1 ? { ...m, homeId: m.awayId, awayId: m.homeId, homeName: m.awayName, awayName: m.homeName } : m))
         fullSchedule.push(r)
       }
@@ -912,8 +980,8 @@ io.on('connection', (socket) => {
       socket.emit('room:joined', { code, participantId: part.id })
       broadcastRoomState(io, room)
 
-      // if in draft, send draft state
-      if (room.draft) socket.emit('draft:state', publicDraftState(room))
+      // if in draft, send draft state (personalized for privatePicks)
+      if (room.draft) socket.emit('draft:state', publicDraftState(room, part.id))
       if (room.championship) {
         socket.emit('championship:state', publicChampionshipState(room))
         const standings = await fetchStandings(room)
@@ -1004,7 +1072,7 @@ io.on('connection', (socket) => {
       participantId: ctx.participant.id,
       options: options.map((p) => ({ id: p.id, name: p.name, position: p.position, overall: p.overall, country: p.country, club: p.club, year: p.year, photoColor: p.photoColor })),
     })
-    io.to(`room:${ctx.room.code}`).emit('draft:state', publicDraftState(ctx.room))
+    emitDraftState(io, ctx.room)
   })
 
   socket.on('draft:pick', async (data: { playerIds: string[] }) => {
@@ -1030,7 +1098,7 @@ io.on('connection', (socket) => {
       participantId: ctx.participant.id,
       players: picks.map((p) => ({ id: p.id, name: p.name, position: p.position, overall: p.overall, country: p.country, club: p.club, year: p.year, photoColor: p.photoColor })),
     })
-    io.to(`room:${ctx.room.code}`).emit('draft:state', publicDraftState(ctx.room))
+    emitDraftState(io, ctx.room)
 
     // advance
     d.currentTurnIndex = (d.currentTurnIndex + 1) % d.order.length

@@ -2,50 +2,52 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Dices, Check, ChevronRight, Loader2, Bot, Crown, ListOrdered, Users } from 'lucide-react'
+import { Dices, Check, Loader2, Bot, Crown, ListOrdered, Users, Sparkles, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { useUserStore } from '@/store/user-store'
-import { useGameStore } from '@/store/game-store'
-import { OvrBadge, PosBadge, PlayerAvatar } from './badges'
-import { POSITIONS, type Position } from '@/lib/types'
+import { useGameStore, type DraftSquad } from '@/store/game-store'
+import { PitchFormation, getFormationSlots } from './pitch-formation'
+import { PlayerCard, RevealableCard } from './player-card'
+import { OvrBadge, PosBadge } from './badges'
+import type { HistoricalPlayer, Position } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-
-const FORMATION_PITCH: Record<string, Position[]> = {
-  '4-3-3': ['Goleiro', 'Lateral Direito', 'Zagueiro', 'Zagueiro', 'Lateral Esquerdo', 'Volante', 'Meio Campo', 'Meia Ofensivo', 'Ponta Direita', 'Centroavante', 'Ponta Esquerdo'],
-  '4-4-2': ['Goleiro', 'Lateral Direito', 'Zagueiro', 'Zagueiro', 'Lateral Esquerdo', 'Volante', 'Meio Campo', 'Meia Ofensivo', 'Ponta Direita', 'Centroavante', 'Ponta Esquerdo'],
-  '3-5-2': ['Goleiro', 'Zagueiro', 'Zagueiro', 'Zagueiro', 'Lateral Direito', 'Volante', 'Meio Campo', 'Meia Ofensivo', 'Lateral Esquerdo', 'Atacante', 'Centroavante'],
-  '4-2-3-1': ['Goleiro', 'Lateral Direito', 'Zagueiro', 'Zagueiro', 'Lateral Esquerdo', 'Volante', 'Volante', 'Ponta Direita', 'Meia Ofensivo', 'Ponta Esquerda', 'Centroavante'],
-  '5-3-2': ['Goleiro', 'Lateral Direito', 'Zagueiro', 'Zagueiro', 'Zagueiro', 'Lateral Esquerdo', 'Volante', 'Meio Campo', 'Meia Ofensivo', 'Atacante', 'Centroavante'],
-  '4-5-1': ['Goleiro', 'Lateral Direito', 'Zagueiro', 'Zagueiro', 'Lateral Esquerdo', 'Volante', 'Meio Campo', 'Meia Ofensivo', 'Ponta Direita', 'Ponta Esquerda', 'Centroavante'],
-  '3-4-3': ['Goleiro', 'Zagueiro', 'Zagueiro', 'Zagueiro', 'Lateral Direito', 'Volante', 'Meio Campo', 'Lateral Esquerdo', 'Ponta Direita', 'Centroavante', 'Ponta Esquerda'],
-}
 
 export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   const user = useUserStore((s) => s.user)!
   const game = useGameStore()
   const draft = game.draft
   const participants = game.participants
+
+  // Track which option cards have been revealed (by player id)
+  const [revealed, setRevealed] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<string[]>([])
   const [rolling, setRolling] = useState(false)
   const [displayRoll, setDisplayRoll] = useState<number | null>(null)
+  // Picks being animated (flying to pitch)
+  const [animatingPicks, setAnimatingPicks] = useState<HistoricalPlayer[]>([])
 
   const myParticipant = participants.find((p) => p.userId === user.id)
   const currentId = draft?.order[draft.currentTurnIndex]
   const currentParticipant = participants.find((p) => p.id === currentId)
   const isMyTurn = currentId === myParticipant?.id
-  const mySquad = game.squads.find((s) => s.id === myParticipant?.id)?.squad || []
-  const myFormation = myParticipant?.formation || '4-3-3'
 
-  // Reset selection when turn changes (adjust during render — no effect needed)
+  // Get my squad from draft.squads (live-updated) — fallback to game.squads
+  const myDraftSquad: DraftSquad | undefined = draft?.squads?.find((s) => s.id === myParticipant?.id)
+  const mySquad: HistoricalPlayer[] = myDraftSquad?.squad || []
+  const myFormation = myDraftSquad?.formation || myParticipant?.formation || '4-3-3'
+
+  // Reset selection/revealed when turn changes
   const [lastTurn, setLastTurn] = useState<string | undefined>(currentId)
-  if (currentId !== lastTurn) {
+  const [lastOptions, setLastOptions] = useState<number>(draft?.currentOptions.length || 0)
+  if (currentId !== lastTurn || (draft?.currentOptions.length || 0) !== lastOptions) {
     setLastTurn(currentId)
+    setLastOptions(draft?.currentOptions.length || 0)
     setSelected([])
-    setRolling(false)
+    setRevealed(new Set())
   }
 
   // Animate dice when lastRoll changes (all setState inside rAF callback)
@@ -69,15 +71,17 @@ export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
     return () => cancelAnimationFrame(raf)
   }, [draft?.lastRoll])
 
-  const handleRoll = () => {
-    emit('draft:roll')
+  const handleRoll = () => emit('draft:roll')
+
+  const handleReveal = (playerId: string) => {
+    setRevealed((prev) => new Set(prev).add(playerId))
   }
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (playerId: string) => {
     setSelected((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id)
-      if (prev.length >= (draft?.picksPerTurn || 2)) return [prev[1], id]
-      return [...prev, id]
+      if (prev.includes(playerId)) return prev.filter((x) => x !== playerId)
+      if (prev.length >= (draft?.picksPerTurn || 2)) return [prev[1], playerId]
+      return [...prev, playerId]
     })
   }
 
@@ -86,24 +90,37 @@ export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
       toast.error('Selecione pelo menos 1 jogador.')
       return
     }
-    emit('draft:pick', { playerIds: selected })
-    setSelected([])
+    // Animate the picked players flying to the pitch before confirming
+    const pickedPlayers = (draft?.currentOptions || []).filter((o) => selected.includes(o.id))
+    setAnimatingPicks(pickedPlayers)
+    setTimeout(() => {
+      emit('draft:pick', { playerIds: selected })
+      setSelected([])
+      setRevealed(new Set())
+      setAnimatingPicks([])
+    }, 700)
   }
 
-  const formationSlots = FORMATION_PITCH[myFormation] || FORMATION_PITCH['4-3-3']
-  // Show placeholder when no roll for the current turn yet
+  const formationSlots = getFormationSlots(myFormation)
   const shownRoll = draft?.lastRoll == null ? null : displayRoll
 
-  // map my squad by position
-  const squadByPos = useMemo(() => {
-    const map: Record<string, typeof mySquad> = {}
-    for (const pos of POSITIONS) map[pos] = []
-    for (const p of mySquad) {
-      if (!map[p.position]) map[p.position] = []
-      map[p.position].push(p)
+  // Needed positions for highlighting on pitch
+  const neededPositions = useMemo(() => {
+    const required = formationSlots.map((s) => s.position)
+    const have = [...mySquad.map((p) => p.position)]
+    const needed = new Set<Position>()
+    for (const req of required) {
+      const idx = have.indexOf(req)
+      if (idx >= 0) have.splice(idx, 1)
+      else needed.add(req)
     }
-    return map
-  }, [mySquad])
+    return needed
+  }, [mySquad, formationSlots])
+
+  // highlight the most urgent needed position
+  const highlightPosition = neededPositions.size > 0 ? Array.from(neededPositions)[0] : null
+
+  const picksPerTurn = draft?.picksPerTurn || 2
 
   if (!draft) {
     return (
@@ -122,32 +139,30 @@ export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
         <div>
           <h1 className="text-2xl font-black tracking-tight">Draft</h1>
           <p className="text-sm text-muted-foreground">
-            Rodada {draft.currentRound}/{draft.totalRounds} · Escolha {draft.picksPerTurn} jogadores por turno
+            Rodada {draft.currentRound}/{draft.totalRounds} · Escolha {picksPerTurn} jogadores por turno
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="w-40 sm:w-56">
-            <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-              <span>Progresso</span>
-              <span>{Math.round(progress)}%</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <motion.div className="h-full bg-emerald-500" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.4 }} />
-            </div>
+        <div className="w-40 sm:w-56">
+          <div className="mb-1 flex justify-between text-xs text-muted-foreground">
+            <span>Progresso</span>
+            <span>{Math.round(progress)}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <motion.div className="h-full bg-emerald-500" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.4 }} />
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[280px_1fr_320px]">
-        {/* Draft order */}
-        <Card>
+      <div className="grid gap-4 lg:grid-cols-[260px_1fr_320px]">
+        {/* Left: Draft order */}
+        <Card className="hidden lg:block">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <ListOrdered className="h-5 w-5 text-emerald-400" /> Ordem
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[30rem] pr-2">
+            <ScrollArea className="h-[34rem] pr-2">
               <div className="space-y-1.5">
                 {draft.order.map((pid, i) => {
                   const p = participants.find((pp) => pp.id === pid)
@@ -183,160 +198,275 @@ export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
           </CardContent>
         </Card>
 
-        {/* Center: dice + options */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between text-lg">
-              <span>Vez de: <span className="text-emerald-400">{currentParticipant?.username}</span></span>
-              {currentParticipant?.isBot && <Badge variant="outline" className="text-xs"><Bot className="mr-1 h-3 w-3" /> Bot</Badge>}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Dice area */}
-            <div className="flex flex-col items-center gap-3 rounded-xl border border-border/50 bg-muted/20 p-6">
-              <AnimatePresence mode="wait">
-                {shownRoll !== null ? (
-                  <motion.div
-                    key={shownRoll}
-                    initial={{ scale: 0, rotate: -180 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: 'spring', stiffness: 200, damping: 12 }}
-                    className={cn(
-                      'grid h-24 w-24 place-items-center rounded-2xl text-5xl font-black shadow-2xl',
-                      rolling ? 'bg-amber-500 text-black animate-pulse' : 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white'
-                    )}
-                  >
-                    {shownRoll}
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="grid h-24 w-24 place-items-center rounded-2xl border-2 border-dashed border-border bg-muted/30"
-                  >
-                    <Dices className="h-10 w-10 text-muted-foreground" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              <div className="text-center">
-                {draft.status === 'rolling' && isMyTurn && (
-                  <Button size="lg" className="font-bold" onClick={handleRoll}>
-                    <Dices className="mr-2 h-5 w-5" /> Rolar dado
-                  </Button>
-                )}
-                {draft.status === 'rolling' && !isMyTurn && (
-                  <p className="text-sm text-muted-foreground">Aguardando {currentParticipant?.username} rolar o dado...</p>
-                )}
-                {draft.status === 'choosing' && isMyTurn && (
-                  <p className="text-sm font-semibold text-emerald-400">Escolha {draft.picksPerTurn} jogadores abaixo</p>
-                )}
-                {draft.status === 'choosing' && !isMyTurn && (
-                  <p className="text-sm text-muted-foreground">{currentParticipant?.username} está escolhendo...</p>
-                )}
-                {draft.status === 'bot-thinking' && (
-                  <p className="flex items-center gap-2 text-sm text-amber-300">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Bot pensando...
-                  </p>
-                )}
-                {draft.status === 'done' && (
-                  <p className="text-sm font-bold text-emerald-400">Draft concluído!</p>
-                )}
-              </div>
-            </div>
-
-            {/* Options */}
-            {draft.currentOptions.length > 0 && draft.status !== 'done' && (
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="text-sm font-semibold">Opções disponíveis</p>
-                  {isMyTurn && draft.status === 'choosing' && (
-                    <Badge variant="secondary">{selected.length}/{draft.picksPerTurn} selecionados</Badge>
-                  )}
+        {/* Center: My pitch + dice + cards */}
+        <div className="space-y-4">
+          {/* My pitch */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-lg">
+                <span className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-emerald-400" /> Meu time
+                </span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{myFormation}</Badge>
+                  <Badge variant="secondary">{mySquad.length}/12</Badge>
+                  {mySquad.length >= 11 && <OvrBadge ovr={Math.round(mySquad.slice(0, 11).reduce((a, p) => a + p.overall, 0) / Math.min(11, mySquad.length))} />}
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {draft.currentOptions.map((opt) => {
-                    const isSel = selected.includes(opt.id)
-                    const canSelect = isMyTurn && draft.status === 'choosing'
-                    return (
-                      <motion.button
-                        key={opt.id}
-                        whileHover={canSelect ? { scale: 1.02 } : {}}
-                        whileTap={canSelect ? { scale: 0.98 } : {}}
-                        onClick={() => canSelect && toggleSelect(opt.id)}
-                        disabled={!canSelect}
+              </CardTitle>
+              {neededPositions.size > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Posições a preencher: {Array.from(neededPositions).map((p) => p).join(', ')}
+                </p>
+              )}
+            </CardHeader>
+            <CardContent>
+              <PitchFormation
+                formation={myFormation}
+                squad={mySquad}
+                highlightPosition={highlightPosition}
+                compact
+              />
+            </CardContent>
+          </Card>
+
+          {/* Dice + action area */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col items-center gap-4">
+                {/* Turn indicator */}
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">Vez de:</span>
+                  <span className="font-bold text-emerald-400">{currentParticipant?.username}</span>
+                  {currentParticipant?.isBot && <Badge variant="outline" className="text-xs"><Bot className="mr-1 h-3 w-3" /> Bot</Badge>}
+                </div>
+
+                {/* Dice */}
+                <div className="flex items-center gap-4">
+                  <AnimatePresence mode="wait">
+                    {shownRoll !== null ? (
+                      <motion.div
+                        key={shownRoll}
+                        initial={{ scale: 0, rotate: -180 }}
+                        animate={{ scale: 1, rotate: 0 }}
+                        transition={{ type: 'spring', stiffness: 200, damping: 12 }}
                         className={cn(
-                          'flex items-center gap-3 rounded-lg border p-2.5 text-left transition',
-                          isSel ? 'border-emerald-500 bg-emerald-500/15 ring-2 ring-emerald-500/40' : 'border-border/50 bg-card/40 hover:border-emerald-500/40',
-                          !canSelect && 'cursor-default'
+                          'grid h-20 w-20 place-items-center rounded-2xl text-4xl font-black shadow-2xl',
+                          rolling ? 'bg-amber-500 text-black animate-pulse' : 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white'
                         )}
                       >
-                        <PlayerAvatar name={opt.name} color={opt.photoColor} size="sm" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-semibold text-sm">{opt.name}</p>
-                          <div className="flex items-center gap-1.5">
-                            <PosBadge position={opt.position} />
-                            <span className="text-[10px] text-muted-foreground truncate">{opt.club} {opt.year}</span>
-                          </div>
-                        </div>
-                        <OvrBadge ovr={opt.overall} />
-                        {isSel && <Check className="h-4 w-4 text-emerald-400" />}
-                      </motion.button>
-                    )
-                  })}
+                        {shownRoll}
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="grid h-20 w-20 place-items-center rounded-2xl border-2 border-dashed border-border bg-muted/30"
+                      >
+                        <Dices className="h-9 w-9 text-muted-foreground" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="flex flex-col gap-1.5">
+                    {draft.status === 'rolling' && isMyTurn && (
+                      <Button size="lg" className="font-bold" onClick={handleRoll}>
+                        <Dices className="mr-2 h-5 w-5" /> Rolar dado
+                      </Button>
+                    )}
+                    {draft.status === 'rolling' && !isMyTurn && (
+                      <p className="text-sm text-muted-foreground">Aguardando rolar o dado...</p>
+                    )}
+                    {draft.status === 'choosing' && isMyTurn && (
+                      <>
+                        <p className="text-sm font-semibold text-emerald-400">Escolha {picksPerTurn} cartas</p>
+                        <p className="text-xs text-muted-foreground">Clique para revelar, depois selecione</p>
+                      </>
+                    )}
+                    {draft.status === 'choosing' && !isMyTurn && (
+                      <p className="text-sm text-muted-foreground">{currentParticipant?.username} está escolhendo...</p>
+                    )}
+                    {draft.status === 'bot-thinking' && (
+                      <p className="flex items-center gap-2 text-sm text-amber-300">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Bot pensando...
+                      </p>
+                    )}
+                    {draft.status === 'done' && (
+                      <p className="text-sm font-bold text-emerald-400">Draft concluído!</p>
+                    )}
+                  </div>
                 </div>
+
+                {/* Pick confirmation */}
                 {isMyTurn && draft.status === 'choosing' && (
-                  <Button className="mt-3 w-full" size="lg" onClick={handlePick} disabled={selected.length === 0}>
-                    <Check className="mr-2 h-5 w-5" /> Confirmar ({selected.length})
-                  </Button>
+                  <div className="flex w-full items-center gap-3">
+                    <Badge variant="secondary" className="text-sm">
+                      {selected.length}/{picksPerTurn} selecionados
+                    </Badge>
+                    <Button
+                      className="flex-1"
+                      size="lg"
+                      onClick={handlePick}
+                      disabled={selected.length === 0}
+                    >
+                      <Check className="mr-2 h-5 w-5" /> Confirmar ({selected.length})
+                    </Button>
+                  </div>
                 )}
               </div>
-            )}
+            </CardContent>
+          </Card>
 
-            {draft.currentOptions.length === 0 && draft.status !== 'done' && draft.lastRoll === null && (
-              <div className="rounded-lg border border-dashed border-border/50 p-8 text-center text-sm text-muted-foreground">
-                {isMyTurn ? 'Role o dado para ver as opções de jogadores.' : 'Aguarde o turno atual.'}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          {/* Options as eFootball cards with reveal animation */}
+          {draft.currentOptions.length > 0 && draft.status !== 'done' && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex flex-wrap items-center gap-2 text-lg">
+                  <Sparkles className="h-5 w-5 text-amber-400" /> Cartas disponíveis
+                  {isMyTurn && draft.status === 'choosing' && (
+                    <Badge variant="outline" className="text-xs">Clique para revelar</Badge>
+                  )}
+                  {draft.hideOvr && (
+                    <Badge variant="outline" className="text-xs border-violet-500/40 text-violet-300">OVR oculto</Badge>
+                  )}
+                  {draft.privatePicks && (
+                    <Badge variant="outline" className="text-xs border-rose-500/40 text-rose-300">Picks privados</Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                  <AnimatePresence>
+                    {draft.currentOptions.map((opt) => {
+                      const isRevealed = revealed.has(opt.id)
+                      const isSel = selected.includes(opt.id)
+                      const canInteract = isMyTurn && draft.status === 'choosing'
+                      return (
+                        <motion.div
+                          key={opt.id}
+                          layout
+                          initial={{ opacity: 0, scale: 0.5, y: 30, rotateY: -15 }}
+                          animate={{
+                            opacity: 1,
+                            scale: animatingPicks.find((p) => p.id === opt.id) ? 0.3 : 1,
+                            y: animatingPicks.find((p) => p.id === opt.id) ? -120 : 0,
+                            rotateY: animatingPicks.find((p) => p.id === opt.id) ? 180 : 0,
+                          }}
+                          exit={{ opacity: 0, scale: 0, y: -50 }}
+                          transition={{ type: 'spring', stiffness: 220, damping: 18 }}
+                          whileHover={!isRevealed || !canInteract ? {} : { scale: 1.05 }}
+                        >
+                          <RevealableCard
+                            player={opt}
+                            revealed={isRevealed}
+                            onReveal={() => handleReveal(opt.id)}
+                            onSelect={() => canInteract && toggleSelect(opt.id)}
+                            selected={isSel}
+                            disabled={!canInteract && !isRevealed}
+                            hideOvr={draft.hideOvr}
+                          />
+                        </motion.div>
+                      )
+                    })}
+                  </AnimatePresence>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-        {/* My squad */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Users className="h-5 w-5 text-emerald-400" /> Meu time
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">{myFormation} · {mySquad.length} jogadores</p>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[30rem] pr-2">
+          {draft.currentOptions.length === 0 && draft.status !== 'done' && draft.lastRoll === null && (
+            <Card>
+              <CardContent className="p-8 text-center text-sm text-muted-foreground">
+                {isMyTurn ? 'Role o dado para revelar as cartas de jogadores.' : 'Aguarde o turno atual.'}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Private picks: other players see a hidden state */}
+          {draft.privatePicks && !isMyTurn && draft.status === 'choosing' && (
+            <Card className="border-rose-500/30 bg-rose-500/5">
+              <CardContent className="p-8 text-center">
+                <motion.div
+                  animate={{ opacity: [0.5, 1, 0.5] }}
+                  transition={{ repeat: Infinity, duration: 2 }}
+                  className="text-sm font-semibold text-rose-300"
+                >
+                  🔒 {currentParticipant?.username} está escolhendo em privado...
+                </motion.div>
+                <p className="mt-1 text-xs text-muted-foreground">As cartas ficam ocultas até o pick ser confirmado.</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Right: Picks feed + needed positions */}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <ListOrdered className="h-5 w-5 text-emerald-400" /> Posições
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
               <div className="space-y-1.5">
-                {formationSlots.map((pos, i) => {
-                  const players = squadByPos[pos] || []
-                  const filled = players.length > 0
+                {formationSlots.map((slot, i) => {
+                  const filled = mySquad.filter((p) => p.position === slot.position).length > i - mySquad.filter((p) => p.position === slot.position && formationSlots.findIndex(s => s.position === slot.position) < formationSlots.indexOf(slot)).length
+                  // simpler: count how many of this position we have
+                  const haveCount = mySquad.filter((p) => p.position === slot.position).length
+                  const slotIndex = formationSlots.filter((s, si) => si <= i && s.position === slot.position).length
+                  const isFilled = slotIndex <= haveCount
                   return (
-                    <div key={i} className={cn('flex items-center gap-2 rounded-lg border p-2', filled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-dashed border-border/40 bg-muted/20')}>
-                      <PosBadge position={pos} className="w-12" />
-                      {filled ? (
-                        <div className="flex flex-1 flex-wrap gap-1.5">
-                          {players.map((p) => (
-                            <div key={p.id} className="flex items-center gap-1.5 rounded bg-card/60 px-2 py-1">
-                              <PlayerAvatar name={p.name} color={p.photoColor} size="sm" />
-                              <span className="text-xs font-medium">{p.name}</span>
-                              <OvrBadge ovr={p.overall} className="scale-90" />
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="flex-1 text-xs text-muted-foreground italic">Vazio</span>
+                    <div
+                      key={i}
+                      className={cn(
+                        'flex items-center gap-2 rounded-lg border p-2',
+                        isFilled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-dashed border-border/40 bg-muted/20'
                       )}
+                    >
+                      <PosBadge position={slot.position} className="w-12" />
+                      <span className="flex-1 text-xs">{isFilled ? 'Preenchido' : 'Vazio'}</span>
+                      {isFilled ? <Check className="h-4 w-4 text-emerald-400" /> : null}
                     </div>
                   )
                 })}
               </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <ChevronRight className="h-5 w-5 text-emerald-400" /> Últimas escolhas
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[16rem] pr-2">
+                <div className="space-y-1.5">
+                  {[...draft.picks].reverse().slice(0, 15).map((pick, i) => {
+                    const p = participants.find((pp) => pp.id === pick.participantId)
+                    return (
+                      <motion.div
+                        key={`${pick.participantId}-${pick.playerId}-${i}`}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-2 rounded border border-border/40 bg-card/30 p-1.5"
+                      >
+                        <PosBadge position={pick.position} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium">{pick.playerName}</p>
+                          <p className="truncate text-[10px] text-muted-foreground">{p?.username}</p>
+                        </div>
+                        <OvrBadge ovr={pick.overall} className="scale-90" />
+                      </motion.div>
+                    )
+                  })}
+                  {draft.picks.length === 0 && (
+                    <p className="py-4 text-center text-xs text-muted-foreground">Nenhuma escolha ainda.</p>
+                  )}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

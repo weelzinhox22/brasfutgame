@@ -24,7 +24,7 @@ export function OvrBadge({ ovr, className }: { ovr: number; className?: string }
   )
 }
 
-const POS_COLORS: Record<string, string> = {
+export const POS_COLORS: Record<string, string> = {
   Goleiro: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40',
   'Lateral Direito': 'bg-sky-500/20 text-sky-300 border-sky-500/40',
   Zagueiro: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
