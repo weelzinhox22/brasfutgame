@@ -235,6 +235,47 @@ export function HostEngineListener() {
         }
         await eng.pushChat(msg)
       },
+      'room:participant-joined': async (payload) => {
+        // Refresh participants from DB so new joiners are included in the engine state
+        if (engineRef.current?.state) {
+          const supabase = getSupabaseClient()
+          const roomCode = currentChannel?.replace('room-', '')
+          if (roomCode) {
+            const { data: dbRoom } = await supabase
+              .from('Room')
+              .select('*, participants:RoomParticipant(*)')
+              .eq('code', roomCode.toUpperCase())
+              .single()
+            if (dbRoom?.participants) {
+              const dbParticipants = (dbRoom.participants as any[]).sort(
+                (a: any, b: any) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime()
+              )
+              // Merge DB participants into engine state
+              for (const dbp of dbParticipants) {
+                const existing = engineRef.current.state.participants.find((p) => p.id === dbp.id)
+                if (!existing) {
+                  engineRef.current.state.participants.push({
+                    id: dbp.id,
+                    userId: dbp.userId,
+                    username: dbp.username,
+                    isBot: dbp.isBot,
+                    botMode: dbp.botMode,
+                    isHost: dbp.isHost,
+                    joinedAt: new Date(dbp.joinedAt).getTime(),
+                    online: true,
+                    teamName: dbp.teamName,
+                    teamOvr: dbp.teamOvr,
+                    squad: [],
+                    formation: dbp.formation || '4-3-3',
+                  })
+                } else {
+                  existing.online = true
+                }
+              }
+            }
+          }
+        }
+      },
       'room:leave': async (payload) => {
         if (!engineRef.current?.state) return
         const participant = engineRef.current.state.participants.find(
