@@ -408,18 +408,27 @@ export function simulateMatch(
         fromX, fromY
       ));
 
-      currentX = newX;
-      currentY = newY;
       currentPlayer = receiver;
 
-      // Sometimes add a small player movement after the pass (repositioning)
+      // Player receives and controls the ball (slows down the visual pacing)
+      const controlX = newX + (rng() - 0.5) * 4;
+      const controlY = newY + (rng() - 0.5) * 3;
+      allEvents.push(makeEvent(minute, 'dribble', isHomeAttacking ? 'home' : 'away', receiver.name,
+        controlX, controlY,
+        `${receiver.name} domina a bola`,
+        newX, newY
+      ));
+      currentX = controlX;
+      currentY = controlY;
+
+      // Sometimes add a small additional body adjustment (repositioning)
       if (rng() < 0.35 && passCount < maxBuildUpPasses - 1) {
-        const repositionX = newX + (rng() - 0.5) * 5;
-        const repositionY = newY + (rng() - 0.5) * 4;
+        const repositionX = controlX + (rng() - 0.5) * 4;
+        const repositionY = controlY + (rng() - 0.5) * 3;
         allEvents.push(makeEvent(minute, 'dribble', isHomeAttacking ? 'home' : 'away', receiver.name,
           repositionX, repositionY,
           `${receiver.name} ajeita o corpo`,
-          newX, newY
+          controlX, controlY
         ));
         currentX = repositionX;
         currentY = repositionY;
@@ -492,6 +501,19 @@ export function simulateMatch(
           currentX = newX;
           currentY = newY;
           currentPlayer = receiver;
+
+          // Receive/control event after progressive pass
+          if (rng() < 0.6) {
+            const controlX = newX + (rng() - 0.5) * 3;
+            const controlY = newY + (rng() - 0.5) * 2;
+            allEvents.push(makeEvent(minute, 'dribble', isHomeAttacking ? 'home' : 'away', receiver.name,
+              controlX, controlY,
+              `${receiver.name} domina a bola`,
+              newX, newY
+            ));
+            currentX = controlX;
+            currentY = controlY;
+          }
         }
       }
     }

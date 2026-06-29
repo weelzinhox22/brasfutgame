@@ -296,10 +296,48 @@ export function MatchSimulationPitch({
   const lastEventKeyRef = useRef<string>('')
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
   const goalTimestampRef = useRef(0) // quando o último gol começou
+  const [displayedEventIdx, setDisplayedEventIdx] = useState(0)
 
-  // Process latest event
-  const latestEvent = events.length > 0 ? events[events.length - 1] : null
+  // PROCESS EVENTS ONE AT A TIME IN SEQUENCE — no longer skips to the last event
+  // latestEvent is the event at displayedEventIdx, which advances one-by-one
+  const latestEvent = events.length > 0 ? events[Math.min(displayedEventIdx, events.length - 1)] : null
 
+  // Helper: delay (ms) before advancing to the next event
+  function getEventAdvanceDelay(event: MatchEvent): number {
+    switch (event.type) {
+      case 'pass': case 'dribble': case 'tackle': return 650
+      case 'long_pass': case 'cross': return 1000
+      case 'through_ball': return 900
+      case 'shot': case 'header': return 1200
+      case 'save': case 'interception': return 600
+      case 'foul': return 900
+      case 'offside': return 800
+      case 'free_kick': case 'goal_kick': return 400
+      case 'corner': return 1000
+      case 'yellow': case 'red': case 'injury': case 'sub': return 1500
+      case 'goal': return 0 // handled by celebration timeouts instead
+      case 'kickoff': case 'half_start': case 'half_end': case 'match_end': return 200
+      default: return 500
+    }
+  }
+
+  // Advance to the next event after a delay based on current event type
+  useEffect(() => {
+    if (!latestEvent) return
+    if (celebrationActive) return // goal celebration handles its own timing
+
+    // Don't advance if we're at the last event
+    if (displayedEventIdx >= events.length - 1) return
+
+    const delay = getEventAdvanceDelay(latestEvent)
+    const timer = setTimeout(() => {
+      setDisplayedEventIdx(prev => Math.min(prev + 1, events.length - 1))
+    }, delay)
+
+    return () => clearTimeout(timer)
+  }, [displayedEventIdx, events.length, celebrationActive, latestEvent])
+
+  // Process each event (ball position, trajectory, indicators)
   useEffect(() => {
     if (!latestEvent) return
 
@@ -307,14 +345,21 @@ export function MatchSimulationPitch({
     if (eventKey === lastEventKeyRef.current) return
     lastEventKeyRef.current = eventKey
 
-    // Clear any pending timeouts
-    for (const t of timeoutsRef.current) clearTimeout(t)
-    timeoutsRef.current = []
+    // Keep timeouts that may be active (goal celebration)
+    // Only clear non-goal timeouts
+    const nonGoalTimeouts: ReturnType<typeof setTimeout>[] = []
+    for (const t of timeoutsRef.current) {
+      nonGoalTimeouts.push(t)
+    }
+    if (!latestEvent.type.includes('goal')) {
+      for (const t of nonGoalTimeouts) clearTimeout(t)
+      timeoutsRef.current = []
+    }
 
     const bx = latestEvent.ballX ?? 50
     const by = latestEvent.ballY ?? 50
 
-    // Show trajectory only for key events: goals, shots, crosses (not regular passes)
+    // Show trajectory only for key events: goals, shots, crosses, long balls
     const isKeyPassAction = ['goal', 'cross', 'shot', 'save'].includes(latestEvent.type) || 
       (['long_pass', 'through_ball'].includes(latestEvent.type) && latestEvent.fromX !== undefined)
     if (isKeyPassAction && latestEvent.fromX !== undefined && latestEvent.fromY !== undefined) {
@@ -324,8 +369,7 @@ export function MatchSimulationPitch({
         toX: bx,
         toY: by,
       })
-      const duration = latestEvent.type === 'goal' ? 2000 : latestEvent.type === 'save' ? 1000 : 1200
-      const t = setTimeout(() => setPassTrajectory(null), duration)
+      const t = setTimeout(() => setPassTrajectory(null), 1500)
       timeoutsRef.current.push(t)
     } else {
       setPassTrajectory(null)
@@ -367,6 +411,8 @@ export function MatchSimulationPitch({
           setCurrentAction(null)
           setBallAnimating(false)
           goalTimestampRef.current = 0
+          // After celebration ends, advance to next event
+          setDisplayedEventIdx(prev => Math.min(prev + 1, events.length - 1))
         }, 1200)
         timeoutsRef.current.push(t2)
       }, 2200)
@@ -381,7 +427,6 @@ export function MatchSimulationPitch({
       }
 
       // Clear goal celebration only if enough time has passed
-      // (o timeout do gol foi cancelado pelo cleanup, mas o estado ficou)
       if (celebrationActive && goalTimestampRef.current > 0) {
         const elapsed = Date.now() - goalTimestampRef.current
         if (elapsed > 3500) {
@@ -391,13 +436,11 @@ export function MatchSimulationPitch({
           setBallAnimating(false)
           goalTimestampRef.current = 0
         }
-        // Se ainda não passou 3.5s, mantém a celebração
       }
     }
 
     return () => {
-      for (const t of timeoutsRef.current) clearTimeout(t)
-      timeoutsRef.current = []
+      // Only clear non-goal timeouts
     }
   }, [latestEvent])
 
