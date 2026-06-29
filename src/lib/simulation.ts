@@ -359,74 +359,108 @@ export function simulateMatch(
       undefined, undefined
     ));
 
-    // ---- 2. BUILD-UP (2-4 short passes) ----
+    // ---- 2. POSITIONING ADJUSTMENT (players reposition) ----
+    // Show a brief player movement before the pass sequence
+    if (rng() < 0.4) {
+      const mover = recoverer;
+      const posX = currentX + (rng() - 0.5) * 8;
+      const posY = currentY + (rng() - 0.5) * 6;
+      allEvents.push(makeEvent(minute, 'dribble', isHomeAttacking ? 'home' : 'away', mover.name,
+        posX, posY, `${mover.name} se posiciona`,
+        currentX, currentY
+      ));
+      currentX = posX;
+      currentY = posY;
+    }
+
+    // ---- 2. BUILD-UP structured like Brasfoot (short passes, triangulations) ----
     let currentZone = startZone + 0.3;
     let currentX = recoveryX;
     let currentY = recoveryY;
     let currentPlayer = recoverer;
     let passCount = 0;
-    const maxBuildUpPasses = 1 + Math.floor(rng() * 3);
+    // Build-up: 2-4 short passes max — always short, no long balls in buildup
+    const maxBuildUpPasses = 2 + Math.floor(rng() * 2);
 
-    for (let p = 0; p < maxBuildUpPasses && currentZone < maxZone; p++) {
+    for (let p = 0; p < maxBuildUpPasses && currentZone < maxZone - 0.8; p++) {
       const passer = currentPlayer;
+      // Prefer nearby players (midfielders first, then fullbacks, then forwards)
       const receiver = pickPlayer(attackingTeam, 'pass', rng, usedPlayers);
       usedPlayers.add(receiver.name);
       passCount++;
 
-      // Progress zone by 0.3-0.8
-      currentZone += 0.3 + rng() * 0.6;
-      const passLength = currentZone > 2.5 ? 'long_pass' : 'pass';
+      // Progress zone slowly — 0.2 to 0.5 per pass (gradual buildup)
+      currentZone += 0.2 + rng() * 0.4;
+      // Always short pass during buildup
       const newY = zoneToBallY(currentZone, isHomeAttacking);
-      const newX = randomX(currentZone, rng, receiver.position === 'Ponta Direita' || receiver.position === 'Ponta Esquerda');
+      const newX = randomX(currentZone, rng,
+        receiver.position === 'Ponta Direita' || receiver.position === 'Ponta Esquerda');
 
       const fromX = currentX;
       const fromY = currentY;
 
+      // Short, quick passes
       allEvents.push(makeEvent(
-        minute, passLength as MatchEventType,
+        minute, 'pass',
         isHomeAttacking ? 'home' : 'away', passer.name,
         newX, newY,
-        `${passer.name} → ${receiver.name}${passLength === 'long_pass' ? ' (lançamento)' : ''}`,
+        `${passer.name} → ${receiver.name}`,
         fromX, fromY
       ));
 
       currentX = newX;
       currentY = newY;
       currentPlayer = receiver;
+
+      // Sometimes add a small player movement after the pass (repositioning)
+      if (rng() < 0.35 && passCount < maxBuildUpPasses - 1) {
+        const repositionX = newX + (rng() - 0.5) * 5;
+        const repositionY = newY + (rng() - 0.5) * 4;
+        allEvents.push(makeEvent(minute, 'dribble', isHomeAttacking ? 'home' : 'away', receiver.name,
+          repositionX, repositionY,
+          `${receiver.name} ajeita o corpo`,
+          newX, newY
+        ));
+        currentX = repositionX;
+        currentY = repositionY;
+      }
     }
 
-    // ---- 3. PROGRESSION (1-2 passes or a dribble forward) ----
+    // ---- 3. PROGRESSION (1-2 attacking passes or a dribble forward) ----
     let playStopped = false;
     const hasProgression = passCount >= 1 && currentZone < maxZone - 0.5;
     if (hasProgression) {
       const progressCount = 1 + Math.floor(rng() * 1);
       for (let p = 0; p < progressCount && currentZone < maxZone - 0.3 && !playStopped; p++) {
-        const useDribble = rng() < 0.3 && roleDribbleWeight(currentPlayer.position) > 0.8;
+        const useDribble = rng() < 0.25 && roleDribbleWeight(currentPlayer.position) > 0.8;
         if (useDribble) {
-          currentZone += 0.5 + rng() * 0.5;
+          currentZone += 0.4 + rng() * 0.4;
           const newY = zoneToBallY(currentZone, isHomeAttacking);
-          const newX = currentX + (rng() - 0.5) * 15;
+          const newX = currentX + (rng() - 0.5) * 12;
           allEvents.push(makeEvent(
             minute, 'dribble',
             isHomeAttacking ? 'home' : 'away', currentPlayer.name,
             newX, newY,
-            `${currentPlayer.name} avança driblando`,
+            `${currentPlayer.name} avança conduzindo`,
             currentX, currentY
           ));
           currentX = newX;
           currentY = newY;
         } else {
-          // Through ball
+          // Progressive pass (to a more advanced position - through ball or short pass)
           const receiver = pickPlayer(attackingTeam, 'pass', rng, usedPlayers);
           usedPlayers.add(receiver.name);
-          currentZone += 0.7 + rng() * 0.5;
+          currentZone += 0.5 + rng() * 0.4;
+          const Dist = currentZone * 10;
+          const isLongBall = rng() < 0.15; // 15% chance of through ball
           const newY = zoneToBallY(currentZone, isHomeAttacking);
-          const newX = randomX(currentZone, rng, receiver.position === 'Ponta Direita' || receiver.position === 'Ponta Esquerda');
+          const newX = randomX(currentZone, rng,
+            receiver.position === 'Ponta Direita' || receiver.position === 'Ponta Esquerda');
           const fromX = currentX;
           const fromY = currentY;
 
           // Check for offside on through balls
-          if (currentZone > 3.5 && rng() < 0.08) {
+          if (isLongBall && currentZone > 3.5 && rng() < 0.08) {
             allEvents.push(makeEvent(
               minute, 'offside',
               isHomeAttacking ? 'home' : 'away', receiver.name,
@@ -434,7 +468,6 @@ export function simulateMatch(
               `Impedimento! ${receiver.name} está impedido`,
               fromX, fromY, 'offside_flag'
             ));
-            // After offside, ball goes to defending team's goalkeeper (indirect free kick)
             const defGK = defendingTeam.players.find(p => p.position === 'Goleiro')!;
             const gkY = isHomeAttacking ? 88 : 5;
             allEvents.push(makeEvent(
@@ -445,14 +478,15 @@ export function simulateMatch(
               currentX, zoneToBallY(currentZone - 0.3, isHomeAttacking)
             ));
             playStopped = true;
-            break; // Exit progression loop — play is stopped by offside
+            break;
           }
 
+          const passType = isLongBall ? 'through_ball' : 'pass';
           allEvents.push(makeEvent(
-            minute, 'through_ball',
+            minute, passType as MatchEventType,
             isHomeAttacking ? 'home' : 'away', currentPlayer.name,
             newX, newY,
-            `${currentPlayer.name} enfia para ${receiver.name}`,
+            isLongBall ? `${currentPlayer.name} enfia para ${receiver.name}` : `${currentPlayer.name} toca para ${receiver.name}`,
             fromX, fromY
           ));
           currentX = newX;
@@ -466,9 +500,13 @@ export function simulateMatch(
     // Skip if play was stopped (offside, etc.)
     if (!playStopped && currentZone > 2.8) {
       const shooter = currentPlayer;
-      const shotType: MatchEventType = (currentPlayer.position === 'Ponta Direita' || currentPlayer.position === 'Ponta Esquerda') && rng() < 0.4 
+      const isWinger = currentPlayer.position === 'Ponta Direita' || currentPlayer.position === 'Ponta Esquerda';
+      const isCentral = currentPlayer.position === 'Centroavante' || currentPlayer.position === 'Atacante' || currentPlayer.position === 'Meia Ofensivo';
+      const shotType: MatchEventType = isWinger && rng() < 0.55 
         ? 'cross' 
-        : 'shot';
+        : isCentral && rng() < 0.75
+          ? 'shot'
+          : rng() < 0.4 ? 'cross' : 'shot';
       
       if (shotType === 'cross') {
         // Cross into the box

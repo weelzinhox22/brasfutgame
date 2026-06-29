@@ -314,17 +314,17 @@ export function MatchSimulationPitch({
     const bx = latestEvent.ballX ?? 50
     const by = latestEvent.ballY ?? 50
 
-    // Show pass trajectory if we have fromX/fromY and it's a passing action
-    const isPassAction = ['pass', 'long_pass', 'through_ball', 'cross'].includes(latestEvent.type)
-    if (isPassAction && latestEvent.fromX !== undefined && latestEvent.fromY !== undefined) {
+    // Show trajectory only for key events: goals, shots, crosses (not regular passes)
+    const isKeyPassAction = ['goal', 'cross', 'shot', 'save'].includes(latestEvent.type) || 
+      (['long_pass', 'through_ball'].includes(latestEvent.type) && latestEvent.fromX !== undefined)
+    if (isKeyPassAction && latestEvent.fromX !== undefined && latestEvent.fromY !== undefined) {
       setPassTrajectory({
         fromX: latestEvent.fromX,
         fromY: latestEvent.fromY,
         toX: bx,
         toY: by,
       })
-      // Vary trajectory visibility by pass type
-      const duration = latestEvent.type === 'long_pass' ? 1500 : latestEvent.type === 'through_ball' ? 1200 : latestEvent.type === 'cross' ? 1400 : 700
+      const duration = latestEvent.type === 'goal' ? 2000 : latestEvent.type === 'save' ? 1000 : 1200
       const t = setTimeout(() => setPassTrajectory(null), duration)
       timeoutsRef.current.push(t)
     } else {
@@ -461,17 +461,17 @@ export function MatchSimulationPitch({
         )}
       </AnimatePresence>
 
-      {/* Pass trajectory line */}
+      {/* Subtle trajectory line only for key events (goals, shots, saves) */}
       <AnimatePresence>
         {passTrajectory && (
           <motion.svg key="pass-line"
-            initial={{ opacity: 0 }} animate={{ opacity: 0.7 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 h-full w-full z-20 pointer-events-none"
+            initial={{ opacity: 0 }} animate={{ opacity: 0.5 }} exit={{ opacity: 0, transition: { duration: 0.8 } }}
+            className="absolute inset-0 h-full w-full z-15 pointer-events-none"
             viewBox="0 0 100 160" preserveAspectRatio="xMidYMid slice">
             <line x1={passTrajectory.fromX} y1={passTrajectory.fromY}
               x2={passTrajectory.toX} y2={passTrajectory.toY}
-              stroke="rgba(255,255,100,0.6)" strokeWidth="0.5" strokeDasharray="2,2" />
-            <circle cx={passTrajectory.fromX} cy={passTrajectory.fromY} r="0.8" fill="rgba(255,255,100,0.3)" />
+              stroke="rgba(255,255,100,0.35)" strokeWidth="0.3" strokeDasharray="1.5,3" />
+            <circle cx={passTrajectory.fromX} cy={passTrajectory.fromY} r="0.5" fill="rgba(255,255,100,0.2)" />
           </motion.svg>
         )}
       </AnimatePresence>
@@ -596,11 +596,11 @@ export function MatchSimulationPitch({
         )}
       </AnimatePresence>
 
-      {/* THE BALL - smooth spring animation */}
+      {/* THE BALL - slow, fluid motion with acceleration and deceleration */}
       <motion.div className="absolute z-20 pointer-events-none"
         animate={{ left: `${displayBall.x}%`, top: `${displayBall.y}%` }}
         transition={{
-          type: 'spring', stiffness: 80, damping: 14, mass: 0.6,
+          type: 'spring', stiffness: 30, damping: 22, mass: 1.5,
         }}
         style={{ transform: 'translate(-50%, -50%)' }}>
         <motion.div
@@ -610,8 +610,8 @@ export function MatchSimulationPitch({
           }}
           transition={{
             rotate: currentAction === 'goal_kickoff'
-              ? { repeat: Infinity, duration: 0.3, ease: 'linear' }
-              : ballAnimating ? { repeat: Infinity, duration: 1.5 } : { duration: 0.3 },
+              ? { repeat: Infinity, duration: 0.5, ease: 'linear' }
+              : ballAnimating ? { repeat: Infinity, duration: 2.5 } : { duration: 0.3 },
             scale: { duration: 0.3 },
           }}
           className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.5)] ring-2 ring-white/30">
