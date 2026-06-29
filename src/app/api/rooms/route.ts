@@ -22,6 +22,23 @@ export async function POST(req: NextRequest) {
     // ensure unique
     while (await db.room.findUnique({ where: { code } })) code = genCode()
 
+    let user = await db.user.findUnique({ where: { id: userId } })
+    if (!user) {
+      user = await db.user.create({
+        data: {
+          id: userId,
+          username,
+          avatarColor: '#16a34a',
+          country: 'Brasil'
+        }
+      })
+      await db.userRanking.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id, username: user.username, country: user.country },
+        update: {},
+      })
+    }
+
     const finalSettings: RoomSettings = { ...DEFAULT_SETTINGS, ...(settings || {}) }
 
     const room = await db.room.create({

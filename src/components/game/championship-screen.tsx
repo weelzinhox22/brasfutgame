@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Trophy, Goal, Square, AlertTriangle, Activity, Timer, Play, Table2, ListChecks, Loader2, Crown, Medal, ChevronDown, ChevronUp, Star } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Trophy, Goal, Square, AlertTriangle, Activity, Timer, Play, Table2, ListChecks, Loader2, Crown, Medal, ChevronDown, ChevronUp, Star, Flag, LogOut, RotateCcw, ArrowRight, Circle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -11,12 +12,15 @@ import { useUserStore } from '@/store/user-store'
 import { useGameStore } from '@/store/game-store'
 import { OvrBadge } from './badges'
 import { Confetti } from './confetti'
+import { MatchSimulationPitch } from './pitch-formation'
 import type { MatchEvent } from '@/lib/types'
 import { cn } from '@/lib/utils'
+
 
 export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   const user = useUserStore((s) => s.user)!
   const game = useGameStore()
+  const router = useRouter()
   const championship = game.championship
   const matchTimer = game.matchTimer
   const currentMatch = game.currentMatch
@@ -24,9 +28,14 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
   const standings = game.standings
   const draft = game.draft
 
-  const isHost = game.hostId === user.id
+  const myParticipant = game.participants.find((p) => p.userId === user.id)
+  const isHost = myParticipant?.isHost || false
   const [showFullTable, setShowFullTable] = useState(false)
   const [prevStandings, setPrevStandings] = useState<typeof standings>([])
+
+  // Find home and away squads in the current game state to feed the match simulation
+  const homeSquadObj = game.squads.find((s) => (s.teamName || s.username) === currentMatch?.homeName)
+  const awaySquadObj = game.squads.find((s) => (s.teamName || s.username) === currentMatch?.awayName)
 
   // Compute movements by comparing current standings to previous snapshot.
   // We update the snapshot in a transition right after rendering.
@@ -109,7 +118,21 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
 
   // Finished — elaborate champion screen
   if (championship?.finished || game.champion) {
-    return <ChampionScreen champion={game.champion} standings={standings} />
+    return (
+      <ChampionScreen
+        champion={game.champion}
+        standings={standings}
+        topScorers={championship?.topScorers || []}
+        isHost={isHost}
+        onRestart={() => emit('room:restart')}
+        onLeave={() => {
+          emit('room:leave')
+          game.reset()
+          game.setView('lobby')
+          router.push('/')
+        }}
+      />
+    )
   }
 
   if (!championship) {
@@ -145,7 +168,7 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
         <div className="space-y-4">
           {/* Current match */}
           <Card className="overflow-hidden">
-            <div className="pitch-bg bg-gradient-to-b from-emerald-500/10 to-transparent p-6">
+            <div className="pitch-bg bg-gradient-to-b from-emerald-500/10 to-transparent p-6 pb-4">
               <div className="grid grid-cols-3 items-center gap-4">
                 {/* Home */}
                 <motion.div
@@ -205,6 +228,20 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
                 </motion.div>
               </div>
             </div>
+
+            {/* Live 11v11 Pitch Simulation */}
+            {currentMatch && homeSquadObj && awaySquadObj && (
+              <div className="p-6 pt-2 bg-[#090d16] border-t border-white/5 flex justify-center">
+                <MatchSimulationPitch
+                  homeSquad={homeSquadObj.squad}
+                  homeFormation={homeSquadObj.formation}
+                  awaySquad={awaySquadObj.squad}
+                  awayFormation={awaySquadObj.formation}
+                  events={events}
+                  simMinute={simMinute}
+                />
+              </div>
+            )}
           </Card>
 
           {/* Events feed */}
@@ -266,6 +303,37 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
             currentMatch={currentMatch}
           />
 
+          {/* Artilharia (Top Scorers) */}
+          {championship.topScorers && championship.topScorers.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2.5">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Trophy className="h-5 w-5 text-amber-400" /> Artilharia
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[14rem] pr-2">
+                  <div className="space-y-2">
+                    {championship.topScorers.slice(0, 10).map((ts: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between border-b border-border/30 pb-1.5 text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono text-xs font-bold text-muted-foreground w-4">{idx + 1}</span>
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate text-xs">{ts.player}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{ts.team}</p>
+                          </div>
+                        </div>
+                        <Badge variant="secondary" className="font-black text-xs gap-1.5 shrink-0 px-2 py-0.5">
+                          ⚽ {ts.goals} {ts.goals === 1 ? 'gol' : 'gols'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Round schedule */}
           <Card>
             <CardHeader className="pb-3">
@@ -318,19 +386,51 @@ function EventIcon({ type }: { type: string }) {
   if (type === 'injury') return <AlertTriangle className={cn(cls, 'text-orange-400')} />
   if (type === 'sub') return <Activity className={cn(cls, 'text-sky-400')} />
   if (type === 'save') return <Activity className={cn(cls, 'text-violet-400')} />
+  if (type === 'corner') return <Flag className={cn(cls, 'text-yellow-300')} />
+  if (type === 'shot' || type === 'header') return <Goal className={cn(cls, 'text-orange-400')} />
+  if (type === 'pass' || type === 'long_pass' || type === 'through_ball') return <ArrowRight className={cn(cls, 'text-emerald-400')} />
+  if (type === 'cross') return <Flag className={cn(cls, 'text-emerald-400')} />
+  if (type === 'dribble') return <Activity className={cn(cls, 'text-blue-400')} />
+  if (type === 'tackle' || type === 'interception') return <AlertTriangle className={cn(cls, 'text-cyan-400')} />
+  if (type === 'foul') return <AlertTriangle className={cn(cls, 'text-rose-400')} />
+  if (type === 'offside') return <Flag className={cn(cls, 'text-amber-400')} />
+  if (type === 'free_kick' || type === 'goal_kick') return <Circle className={cn(cls, 'text-white')} />
+  if (type === 'kickoff' || type === 'half_start' || type === 'half_end' || type === 'match_end') return <Activity className={cn(cls, 'text-muted-foreground')} />
+  if (type === 'clearance') return <AlertTriangle className={cn(cls, 'text-lime-400')} />
   return <Activity className={cn(cls, 'text-muted-foreground')} />
 }
 
 function eventLabel(e: MatchEvent): string {
   switch (e.type) {
-    case 'goal': return `GOL! ${e.player}${e.detail ? ` (assist: ${e.detail})` : ''}`
+    case 'goal': return `⚽ GOL! ${e.player}${e.detail ? ` (${e.detail})` : ''}`
     case 'yellow': return `Cartão amarelo: ${e.player}`
     case 'red': return `Cartão vermelho: ${e.player}`
     case 'injury': return `Lesão: ${e.player}`
     case 'sub': return `Substituição: ${e.player}`
     case 'chance': return `Chance perdida: ${e.player}`
     case 'save': return `Defesa: ${e.player}`
-    default: return e.player
+    case 'corner': return `Escanteio cobrado por ${e.player}`
+    case 'shot': return `Finalização de ${e.player}`
+    case 'header': return `Cabeceio de ${e.player}`
+    case 'pass': case 'long_pass': {
+      const parts = e.detail?.split(' → ') || [e.player, '']
+      return `${parts[0]} → ${parts[1] || '...'}`
+    }
+    case 'through_ball': return `Enfiada de ${e.player}`
+    case 'cross': return `Cruzamento de ${e.player}`
+    case 'dribble': return `${e.player} avança driblando`
+    case 'tackle': return `Desarme: ${e.player}`
+    case 'interception': return `Interceptação: ${e.player}`
+    case 'foul': return `Falta: ${e.player}${e.detail ? ` (${e.detail})` : ''}`
+    case 'offside': return `🚩 Impedimento! ${e.player}`
+    case 'free_kick': return `Tiro livre: ${e.player}`
+    case 'goal_kick': return `Tiro de meta`
+    case 'clearance': return `Afastamento: ${e.player}`
+    case 'throw_in': return `Arremesso lateral`
+    case 'kickoff': case 'half_start': return `${e.detail || 'Início de partida'}`
+    case 'half_end': return `⏰ Fim do primeiro tempo`
+    case 'match_end': return `🏁 Fim de partida`
+    default: return e.detail || e.player
   }
 }
 
@@ -442,7 +542,21 @@ function StandingsTable({
 // ============================================================
 // Elaborate champion screen with podium + confetti
 // ============================================================
-function ChampionScreen({ champion, standings }: { champion: { id: string; name: string; points: number } | null; standings: any[] }) {
+function ChampionScreen({
+  champion,
+  standings,
+  topScorers,
+  isHost,
+  onRestart,
+  onLeave,
+}: {
+  champion: { id: string; name: string; points: number } | null
+  standings: any[]
+  topScorers: any[]
+  isHost: boolean
+  onRestart: () => void
+  onLeave: () => void
+}) {
   const top3 = standings.slice(0, 3)
   const rest = standings.slice(3)
 
@@ -551,6 +665,20 @@ function ChampionScreen({ champion, standings }: { champion: { id: string; name:
           </div>
         </CardContent>
       </Card>
+
+      {/* Action buttons */}
+      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
+        {isHost ? (
+          <Button size="lg" className="w-full sm:w-auto font-bold bg-amber-500 hover:bg-amber-600 text-stone-950" onClick={onRestart}>
+            <RotateCcw className="mr-2 h-5 w-5" /> Jogar Novamente
+          </Button>
+        ) : (
+          <p className="text-sm text-muted-foreground animate-pulse">Aguardando o host iniciar uma nova partida...</p>
+        )}
+        <Button size="lg" variant="outline" className="w-full sm:w-auto font-bold border-rose-500/30 text-rose-400 hover:bg-rose-500/10" onClick={onLeave}>
+          <LogOut className="mr-2 h-5 w-5" /> Sair da Sala
+        </Button>
+      </div>
     </div>
   )
 }

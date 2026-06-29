@@ -62,6 +62,7 @@ export interface ChampionshipStateUI {
   currentRoundMatches: { round: number; homeId: string; awayId: string; homeName: string; awayName: string }[]
   timer: { secondsLeft: number; total: number } | null
   finished: boolean
+  topScorers?: { player: string; team: string; goals: number }[]
 }
 
 interface CurrentMatch {
@@ -109,6 +110,7 @@ interface GameStore {
   currentMatch: CurrentMatch | null
   champion: { id: string; name: string; points: number } | null
   squads: Squad[]
+  lastEventIndex: number
 
   setRoomState: (s: Partial<GameStore>) => void
   setSettings: (s: RoomSettings) => void
@@ -117,6 +119,7 @@ interface GameStore {
   setChampionship: (c: ChampionshipStateUI | null) => void
   setStandings: (s: ChampionshipStanding[]) => void
   addMatchEvent: (e: MatchEvent) => void
+  setLastEventIndex: (i: number) => void
   setMatchTimer: (t: { secondsLeft: number; simMinute: number } | null) => void
   setCurrentMatch: (m: CurrentMatch | null) => void
   setChampion: (c: GameStore['champion']) => void
@@ -152,6 +155,7 @@ const initialState = {
   currentMatch: null as CurrentMatch | null,
   champion: null as { id: string; name: string; points: number } | null,
   squads: [] as Squad[],
+  lastEventIndex: 0,
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -164,6 +168,7 @@ export const useGameStore = create<GameStore>((set) => ({
   setChampionship: (c) => set({ championship: c }),
   setStandings: (s) => set({ standings: s }),
   addMatchEvent: (e) => set((st) => ({ matchEvents: [...st.matchEvents, e].slice(-100) })),
+  setLastEventIndex: (i) => set({ lastEventIndex: i }),
   setMatchTimer: (t) =>
     set((st) => ({
       matchTimer: t

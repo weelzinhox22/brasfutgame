@@ -1,0 +1,5 @@
+{
+  "name": "efootdoscria-realtime",
+  "main": "party/server.ts",
+  "compatibilityDate": "2023-05-26"
+}

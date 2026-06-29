@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, LogIn, Search, Trophy, Users, Globe, Shuffle, Loader2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Plus, LogIn, Search, Trophy, Users, Globe, Shuffle, Loader2, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,6 +49,7 @@ interface TeamRow {
 export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   const user = useUserStore((s) => s.user)!
   const setView = useGameStore((s) => s.setView)
+  const router = useRouter()
   const [tab, setTab] = useState('rooms')
 
   // create room dialog
@@ -64,6 +66,7 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
     competitionFormat: 'custom',
     hideOvr: false,
     privatePicks: false,
+    skipDraft: false,
   })
   const [creating, setCreating] = useState(false)
 
@@ -73,6 +76,13 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
 
   // public rooms
   const [rooms, setRooms] = useState<PublicRoom[]>([])
+  const [roomSearch, setRoomSearch] = useState('')
+
+  const filteredRooms = rooms.filter(
+    (r) =>
+      r.code.toLowerCase().includes(roomSearch.toLowerCase()) ||
+      r.name.toLowerCase().includes(roomSearch.toLowerCase())
+  )
 
   // teams
   const [teams, setTeams] = useState<TeamRow[]>([])
@@ -136,8 +146,8 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
       console.log('[handleCreate] emitting room:join')
       emit('room:join', { code: data.code, userId: user.id, username: user.username, password: password || undefined })
       setCreateOpen(false)
-      console.log('[handleCreate] setView room')
-      setView('room')
+      console.log('[handleCreate] navigate to room')
+      router.push(`/room/${data.code}`)
       toast.success(`Sala ${data.code} criada!`)
     } catch (e: any) {
       console.error('[handleCreate] error', e)
@@ -158,7 +168,7 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       emit('room:join', { code: data.code, userId: user.id, username: user.username, password: joinPass || undefined })
-      setView('room')
+      router.push(`/room/${data.code}`)
       toast.success(`Entrou na sala ${data.code}`)
     } catch (e: any) {
       toast.error(e.message || 'Sala não encontrada.')
@@ -167,7 +177,7 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
 
   const handleJoinPublic = (room: PublicRoom) => {
     emit('room:join', { code: room.code, userId: user.id, username: user.username })
-    setView('room')
+    router.push(`/room/${room.code}`)
     toast.success(`Entrou na sala ${room.code}`)
   }
 
@@ -289,6 +299,18 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                       <Switch checked={settings.privatePicks} onCheckedChange={(v) => setSettings((s) => ({ ...s, privatePicks: v }))} />
                     </label>
                   </div>
+                  <div className="border-t border-border/40 pt-3">
+                    <label className="flex cursor-pointer items-center justify-between rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+                      <div>
+                        <p className="flex items-center gap-1.5 text-xs font-semibold">
+                          <Zap className="h-3.5 w-3.5 text-amber-400" />
+                          Draft automático
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">Pular draft manual — escalações aleatórias para todos</p>
+                      </div>
+                      <Switch checked={settings.skipDraft} onCheckedChange={(v) => setSettings((s) => ({ ...s, skipDraft: v }))} />
+                    </label>
+                  </div>
                 </div>
               </div>
               <DialogFooter>
@@ -312,21 +334,35 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
 
         {/* Public rooms */}
         <TabsContent value="rooms" className="mt-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-muted-foreground">Salas abertas aguardando jogadores</p>
-            <Button variant="ghost" size="sm" onClick={refreshRooms}>Atualizar</Button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+            <div className="relative w-full max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar sala por código ou nome..."
+                className="pl-9 font-medium"
+                value={roomSearch}
+                onChange={(e) => setRoomSearch(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground hidden sm:block">Salas abertas aguardando jogadores</p>
+              <Button variant="outline" size="sm" onClick={refreshRooms}>Atualizar</Button>
+            </div>
           </div>
-          {rooms.length === 0 ? (
+
+          {filteredRooms.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
                 <Users className="h-10 w-10 text-muted-foreground" />
-                <p className="text-muted-foreground">Nenhuma sala aberta no momento.</p>
-                <p className="text-sm text-muted-foreground">Crie uma sala privada para começar!</p>
+                <p className="text-muted-foreground">Nenhuma sala encontrada.</p>
+                <p className="text-sm text-muted-foreground">
+                  {rooms.length === 0 ? 'Crie uma sala privada para começar!' : 'Tente buscar com outro código ou nome.'}
+                </p>
               </CardContent>
             </Card>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {rooms.map((r) => (
+              {filteredRooms.map((r) => (
                 <motion.div key={r.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                   <Card className="transition hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-500/5">
                     <CardContent className="p-4">

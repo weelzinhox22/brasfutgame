@@ -100,6 +100,7 @@ export interface RoomSettings {
   competitionFormat: CompetitionFormat;
   hideOvr: boolean; // hide OVR on draft cards, show only names
   privatePicks: boolean; // hide picked cards from other players
+  skipDraft: boolean; // skip manual draft, auto-assign random players
 }
 
 export const DEFAULT_SETTINGS: RoomSettings = {
@@ -112,6 +113,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   competitionFormat: "custom",
   hideOvr: false,
   privatePicks: false,
+  skipDraft: false,
 };
 
 // Compute number of rounds based on format + participant count
@@ -156,12 +158,51 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type MatchEventType =
+  | "kickoff"
+  | "pass"
+  | "long_pass"
+  | "through_ball"
+  | "cross"
+  | "dribble"
+  | "tackle"
+  | "interception"
+  | "clearance"
+  | "shot"
+  | "header"
+  | "save"
+  | "goal"
+  | "corner"
+  | "goal_kick"
+  | "free_kick"
+  | "foul"
+  | "yellow"
+  | "red"
+  | "offside"
+  | "injury"
+  | "sub"
+  | "chance"
+  | "throw_in"
+  | "half_start"
+  | "half_end"
+  | "match_end";
+
 export interface MatchEvent {
   minute: number;
-  type: "goal" | "yellow" | "red" | "injury" | "sub" | "chance" | "save";
+  type: MatchEventType;
   team: "home" | "away";
   player: string;
   detail?: string;
+  /** Position-related fields */
+  pos?: Position;
+  /** Where the ball should be positioned AFTER this event (0-100 % of pitch) */
+  ballX: number;
+  ballY: number;
+  /** Where the ball was before this action (for pass trajectory animation) */
+  fromX?: number;
+  fromY?: number;
+  /** Special animation hint for the client */
+  action?: "goal_scored" | "goal_kickoff" | "corner_kick" | "save" | "foul" | "free_kick" | "offside_flag" | "goal_kick_taken";
 }
 
 export interface MatchStats {

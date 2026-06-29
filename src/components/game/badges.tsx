@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 
 export function ovrColor(ovr: number): string {
@@ -66,6 +67,61 @@ export function PosBadge({ position, className }: { position: string; className?
   )
 }
 
+const crestCache = new Map<string, string | null>()
+
+/**
+ * Fetch team logo/crest from Wikipedia page images.
+ * Scopes out dates or suffix brackets to hit the club's main Wikipedia article.
+ */
+async function getWikipediaTeamCrest(teamName: string): Promise<string | null> {
+  const cleanName = teamName.replace(/\d{4}/g, '').replace(/[-\s]+$/g, '').replace(/\([^)]*\)/g, '').trim()
+  if (cleanName.length < 2) return null
+  if (crestCache.has(cleanName)) {
+    return crestCache.get(cleanName)!
+  }
+
+  // 1. Try Portuguese Wikipedia for crest
+  try {
+    const query = encodeURIComponent(`${cleanName} futebol escudo logo`)
+    const url = `https://pt.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${query}&gsrlimit=1&prop=pageimages&pithumbsize=120&piprop=thumbnail&format=json&origin=*`
+    const res = await fetch(url)
+    const data = await res.json()
+    if (data?.query?.pages) {
+      const pages = data.query.pages
+      const pageId = Object.keys(pages)[0]
+      const source = pages[pageId]?.thumbnail?.source
+      if (source) {
+        crestCache.set(cleanName, source)
+        return source
+      }
+    }
+  } catch (e) {
+    console.error("Wikipedia PT crest error for:", cleanName, e)
+  }
+
+  // 2. Try English Wikipedia
+  try {
+    const query = encodeURIComponent(`${cleanName} club logo crest`)
+    const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${query}&gsrlimit=1&prop=pageimages&pithumbsize=120&piprop=thumbnail&format=json&origin=*`
+    const res = await fetch(url)
+    const data = await res.json()
+    if (data?.query?.pages) {
+      const pages = data.query.pages
+      const pageId = Object.keys(pages)[0]
+      const source = pages[pageId]?.thumbnail?.source
+      if (source) {
+        crestCache.set(cleanName, source)
+        return source
+      }
+    }
+  } catch (e) {
+    console.error("Wikipedia EN crest error for:", cleanName, e)
+  }
+
+  crestCache.set(cleanName, null)
+  return null
+}
+
 export function TeamCrest({
   name,
   year,
@@ -79,6 +135,22 @@ export function TeamCrest({
   accentColor: string
   size?: 'sm' | 'md' | 'lg'
 }) {
+  const [crestUrl, setCrestUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    getWikipediaTeamCrest(name).then((url) => {
+      if (active) {
+        setCrestUrl(url)
+        setLoading(false)
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [name])
+
   const dims = size === 'sm' ? 'h-9 w-9 text-xs' : size === 'lg' ? 'h-16 w-16 text-lg' : 'h-12 w-12 text-sm'
   const initials = name
     .split(' ')
@@ -86,16 +158,26 @@ export function TeamCrest({
     .map((w) => w[0])
     .join('')
     .toUpperCase()
+
   return (
     <div
-      className={cn('relative flex items-center justify-center rounded-full font-extrabold shrink-0 shadow-lg', dims)}
-      style={{
+      className={cn('relative flex items-center justify-center rounded-full font-extrabold shrink-0 shadow-lg overflow-hidden border border-white/20 bg-muted/20', dims)}
+      style={!crestUrl ? {
         background: `linear-gradient(135deg, ${badgeColor} 50%, ${accentColor} 50%)`,
         color: '#fff',
-        border: '2px solid rgba(255,255,255,0.25)',
-      }}
+      } : {}}
     >
-      <span className="drop-shadow-md">{initials}</span>
+      {crestUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={crestUrl}
+          alt={`${name} Crest`}
+          className="h-full w-full object-contain p-1"
+          loading="lazy"
+        />
+      ) : (
+        <span className="drop-shadow-md">{initials}</span>
+      )}
     </div>
   )
 }

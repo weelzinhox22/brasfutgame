@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Crown, Bot, UserPlus, UserMinus, Play, Settings, Users, MessageSquare, ArrowLeft, Shield } from 'lucide-react'
+import { Send, Crown, Bot, UserPlus, UserMinus, Play, Settings, Users, MessageSquare, ArrowLeft, Shield, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { useUserStore } from '@/store/user-store'
 import { useGameStore } from '@/store/game-store'
+import { useRouter } from 'next/navigation'
 import { SIM_SPEEDS, BOT_MODES, BOT_MODE_LABELS, type RoomSettings, type BotMode } from '@/lib/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -23,10 +24,12 @@ import { cn } from '@/lib/utils'
 export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   const user = useUserStore((s) => s.user)!
   const game = useGameStore()
+  const router = useRouter()
   const [chatInput, setChatInput] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
 
-  const isHost = game.hostId === user.id
+  const myParticipant = game.participants.find((p) => p.userId === user.id)
+  const isHost = myParticipant?.isHost || false
   const participants = game.participants
   const humans = participants.filter((p) => !p.isBot)
   const bots = participants.filter((p) => p.isBot)
@@ -59,7 +62,12 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
       toast.error('É necessário pelo menos 2 participantes.')
       return
     }
-    emit('room:start-draft')
+    if (game.settings.skipDraft) {
+      emit('room:start-auto-draft')
+      toast.success('Draft automático iniciado!', { duration: 3000 })
+    } else {
+      emit('room:start-draft')
+    }
   }
 
   const setFormation = (f: string) => {
@@ -70,6 +78,7 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
     emit('room:leave')
     game.reset()
     game.setView('lobby')
+    router.push('/')
   }
 
   return (
@@ -244,6 +253,20 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                   <p className="text-[10px] text-muted-foreground">Esconder dos outros</p>
                 </div>
                 <Switch checked={game.settings.privatePicks} onCheckedChange={(v) => updateSettings({ privatePicks: v })} disabled={!isHost} />
+              </label>
+            </div>
+
+            {/* Auto-draft toggle */}
+            <div className="border-t border-border/40 pt-3">
+              <label className="flex cursor-pointer items-center justify-between rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+                <div>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold">
+                    <Zap className="h-3.5 w-3.5 text-amber-400" />
+                    Draft automático
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Pular draft manual — escalações aleatórias para todos</p>
+                </div>
+                <Switch checked={game.settings.skipDraft} onCheckedChange={(v) => updateSettings({ skipDraft: v })} disabled={!isHost} />
               </label>
             </div>
 

@@ -247,11 +247,19 @@ export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                       <motion.div
                         key={shownRoll}
                         initial={{ scale: 0, rotate: -180 }}
-                        animate={{ scale: 1, rotate: 0 }}
-                        transition={{ type: 'spring', stiffness: 200, damping: 12 }}
+                        animate={
+                          rolling
+                            ? { rotate: [0, 90, 180, 270, 360], scale: [1, 1.15, 1], y: [0, -15, 0] }
+                            : { scale: 1, rotate: 0, y: 0 }
+                        }
+                        transition={
+                          rolling
+                            ? { repeat: Infinity, duration: 0.5, ease: "linear" }
+                            : { type: 'spring', stiffness: 200, damping: 12 }
+                        }
                         className={cn(
                           'grid h-20 w-20 place-items-center rounded-2xl text-4xl font-black shadow-2xl',
-                          rolling ? 'bg-amber-500 text-black animate-pulse' : 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white'
+                          rolling ? 'bg-amber-500 text-black' : 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white'
                         )}
                       >
                         {shownRoll}

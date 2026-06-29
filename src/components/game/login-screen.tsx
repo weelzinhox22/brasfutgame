@@ -68,12 +68,12 @@ export function LoginScreen() {
             </span>
           </h1>
           <p className="max-w-md text-lg text-muted-foreground">
-            Crie salas privadas, dispute o draft com amigos e bots, e simule campeonatos com mais de 500 times e 9.000 jogadores de todas as épocas.
+            Crie salas privadas, dispute o draft com amigos e bots, e simule campeonatos com mais de 549 times e 9.900 jogadores de todas as épocas.
           </p>
           <div className="grid grid-cols-3 gap-3">
             <Feature icon={Users} title="12 jogadores" desc="por sala" />
             <Feature icon={Bot} title="4 modos" desc="de IA" />
-            <Feature icon={Trophy} title="Campeonato" desc="ao vivo" />
+            <Feature icon={Trophy} title="9.900+" desc="lendas históricas" />
           </div>
         </motion.div>
 

@@ -245,8 +245,8 @@ export function botPickPlayers(
         candidates = available;
       }
     } else {
-      // Starting XI complete — draft best bench by mode.
-      candidates = available;
+      // All 11 starting XI positions are filled — no more picks needed.
+      break;
     }
 
     const pick = pickByTier(candidates, botMode, rng);
