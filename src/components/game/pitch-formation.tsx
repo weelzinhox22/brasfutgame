@@ -295,6 +295,7 @@ export function MatchSimulationPitch({
   const [passTrajectory, setPassTrajectory] = useState<{ fromX: number; fromY: number; toX: number; toY: number } | null>(null)
   const lastEventKeyRef = useRef<string>('')
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  const goalTimestampRef = useRef(0) // quando o último gol começou
 
   // Process latest event
   const latestEvent = events.length > 0 ? events[events.length - 1] : null
@@ -347,6 +348,7 @@ export function MatchSimulationPitch({
 
     // Goal handling
     if (latestEvent.type === 'goal') {
+      goalTimestampRef.current = Date.now()
       setScoringTeam(latestEvent.team)
       setCelebrationActive(true)
       setCurrentAction('goal_scored')
@@ -357,7 +359,6 @@ export function MatchSimulationPitch({
         if (lastEventKeyRef.current !== eventKey) return
         setCurrentAction('goal_kickoff')
         setDisplayBall({ x: 50, y: 50 })
-        // Clear trajectory
         setPassTrajectory(null)
         const t2 = setTimeout(() => {
           if (lastEventKeyRef.current !== eventKey) return
@@ -365,6 +366,7 @@ export function MatchSimulationPitch({
           setScoringTeam(null)
           setCurrentAction(null)
           setBallAnimating(false)
+          goalTimestampRef.current = 0
         }, 1200)
         timeoutsRef.current.push(t2)
       }, 2200)
@@ -377,9 +379,19 @@ export function MatchSimulationPitch({
       if (latestEvent.type !== 'corner') {
         setCurrentAction(null)
       }
-      if (latestEvent.type !== 'goal') {
-        // Don't cancel celebration during goal sequence
-        // but do cancel it for other event types after goal celebration
+
+      // Clear goal celebration only if enough time has passed
+      // (o timeout do gol foi cancelado pelo cleanup, mas o estado ficou)
+      if (celebrationActive && goalTimestampRef.current > 0) {
+        const elapsed = Date.now() - goalTimestampRef.current
+        if (elapsed > 3500) {
+          setCelebrationActive(false)
+          setScoringTeam(null)
+          setCurrentAction(null)
+          setBallAnimating(false)
+          goalTimestampRef.current = 0
+        }
+        // Se ainda não passou 3.5s, mantém a celebração
       }
     }
 
