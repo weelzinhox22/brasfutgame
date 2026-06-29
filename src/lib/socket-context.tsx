@@ -25,7 +25,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const room = activeRoomCode || 'lobby'
     const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost'
-    const host = process.env.NEXT_PUBLIC_PARTYKIT_HOST || (isDev ? 'localhost:1999' : 'efootdoscria-realtime.wesley.partykit.dev')
+    const host = process.env.NEXT_PUBLIC_PARTYKIT_HOST || (isDev ? 'localhost:1999' : 'efootdoscria-realtime.weelzinhox22.partykit.dev')
 
     const socket = new PartySocket({ host, room })
     socketRef.current = socket
