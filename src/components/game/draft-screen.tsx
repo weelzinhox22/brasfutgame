@@ -71,7 +71,10 @@ export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
     return () => cancelAnimationFrame(raf)
   }, [draft?.lastRoll])
 
-  const handleRoll = () => emit('draft:roll')
+  const handleRoll = () => {
+    const pid = participants.find((p) => p.userId === user.id)?.id
+    emit('draft:roll', { participantId: pid })
+  }
 
   const handleReveal = (playerId: string) => {
     setRevealed((prev) => new Set(prev).add(playerId))
@@ -94,7 +97,8 @@ export function DraftScreen({ emit }: { emit: (e: string, d?: any) => void }) {
     const pickedPlayers = (draft?.currentOptions || []).filter((o) => selected.includes(o.id))
     setAnimatingPicks(pickedPlayers)
     setTimeout(() => {
-      emit('draft:pick', { playerIds: selected })
+      const pid = participants.find((p) => p.userId === user.id)?.id
+      emit('draft:pick', { participantId: pid, playerIds: selected })
       setSelected([])
       setRevealed(new Set())
       setAnimatingPicks([])

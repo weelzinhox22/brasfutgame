@@ -19,6 +19,7 @@ import { useUserStore } from '@/store/user-store'
 import { useGameStore } from '@/store/game-store'
 import { TeamCrest, OvrBadge } from './badges'
 import { SIM_SPEEDS, BOT_MODES, BOT_MODE_LABELS, type RoomSettings, type BotMode } from '@/lib/types'
+import { useSocket } from '@/lib/socket-context'
 import { toast } from 'sonner'
 
 interface PublicRoom {
@@ -46,7 +47,8 @@ interface TeamRow {
   playerCount: number
 }
 
-export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
+export function LobbyScreen({ emit: _emit }: { emit: (e: string, d?: any) => void }) {
+  const { broadcast } = useSocket()
   const user = useUserStore((s) => s.user)!
   const setView = useGameStore((s) => s.setView)
   const router = useRouter()
@@ -143,8 +145,6 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
       console.log('[handleCreate] response', { ok: res.ok, code: data.code, error: data.error })
       if (!res.ok) throw new Error(data.error)
       // join via socket
-      console.log('[handleCreate] emitting room:join')
-      emit('room:join', { code: data.code, userId: user.id, username: user.username, password: password || undefined })
       setCreateOpen(false)
       console.log('[handleCreate] navigate to room')
       router.push(`/room/${data.code}`)
@@ -167,7 +167,6 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
       const res = await fetch(`/api/rooms/${joinCode.trim().toUpperCase()}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      emit('room:join', { code: data.code, userId: user.id, username: user.username, password: joinPass || undefined })
       router.push(`/room/${data.code}`)
       toast.success(`Entrou na sala ${data.code}`)
     } catch (e: any) {
@@ -176,7 +175,6 @@ export function LobbyScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   }
 
   const handleJoinPublic = (room: PublicRoom) => {
-    emit('room:join', { code: room.code, userId: user.id, username: user.username })
     router.push(`/room/${room.code}`)
     toast.success(`Entrou na sala ${room.code}`)
   }

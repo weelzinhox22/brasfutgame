@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { SocketProvider } from "@/lib/socket-context";
+import { HostEngineListener } from "@/components/game/host-engine-listener";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,6 +33,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground min-h-screen`}
       >
         <SocketProvider>
+          <HostEngineListener />
           {children}
         </SocketProvider>
         <Toaster />

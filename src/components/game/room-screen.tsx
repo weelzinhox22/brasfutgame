@@ -40,7 +40,7 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
 
   const sendChat = () => {
     if (!chatInput.trim()) return
-    emit('chat:message', { content: chatInput.trim() })
+    emit('chat:message', { userId: user.id, content: chatInput.trim() })
     setChatInput('')
   }
 
@@ -71,11 +71,12 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   }
 
   const setFormation = (f: string) => {
-    emit('room:set-formation', { formation: f })
+    const pid = participants.find((p) => p.userId === user.id)?.id
+    emit('room:set-formation', { participantId: pid, formation: f })
   }
 
   const leaveRoom = () => {
-    emit('room:leave')
+    emit('room:leave', { userId: user.id })
     game.reset()
     game.setView('lobby')
     router.push('/')

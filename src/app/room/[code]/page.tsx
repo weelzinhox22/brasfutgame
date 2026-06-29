@@ -12,13 +12,52 @@ import { DraftScreen } from '@/components/game/draft-screen'
 import { ChampionshipScreen } from '@/components/game/championship-screen'
 import { Loader2 } from 'lucide-react'
 
+async function fetchRoomState(code: string, userId: string, username: string) {
+  try {
+    // Join the room via POST (adds participant if not already joined)
+    const joinRes = await fetch(`/api/rooms/${code.toUpperCase()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, username }),
+    })
+    if (!joinRes.ok) {
+      const err = await joinRes.json()
+      console.error('[fetchRoomState] join error:', err.error)
+      return
+    }
+    const joinData = await joinRes.json()
+
+    // Set participantId in the store
+    const game = useGameStore.getState()
+    game.setRoomState({ participantId: joinData.participantId })
+
+    // Fetch full room state
+    const res = await fetch(`/api/rooms/${code.toUpperCase()}`)
+    if (res.ok) {
+      const data = await res.json()
+      game.setRoomState({
+        roomCode: data.code,
+        hostId: data.hostId,
+        settings: data.settings,
+        status: data.status,
+        participants: data.participants || [],
+      })
+      if (data.squads && data.squads.length > 0) {
+        game.setSquads(data.squads)
+      }
+    }
+  } catch (e) {
+    console.error('[fetchRoomState] error:', e)
+  }
+}
+
 export default function RoomPage() {
   const params = useParams()
   const code = ((params.code as string) || '').toUpperCase()
   const user = useUserStore((s) => s.user)
   const view = useGameStore((s) => s.view)
   const roomCode = useGameStore((s) => s.roomCode)
-  const { connected, emit } = useSocket()
+  const { connected, broadcast, subscribe } = useSocket()
   const router = useRouter()
   const joinedRef = useRef(false)
 
@@ -43,9 +82,14 @@ export default function RoomPage() {
         useGameStore.getState().reset()
         useGameStore.getState().setView('room')
       }
-      emit('room:join', { code, userId: user.id, username: user.username })
+      // Subscribe to the room channel via Supabase Realtime
+      subscribe(`room-${code}`)
+      // Load room state from API
+      fetchRoomState(code, user.id, user.username)
+      // Broadcast that we joined
+      broadcast('room:participant-joined', { code, userId: user.id, username: user.username })
     }
-  }, [user, connected, code, roomCode, view, emit, router])
+  }, [user, connected, code, roomCode, view, subscribe, broadcast, router])
 
   // Watch for errors or room leaving — redirect to lobby
   useEffect(() => {
@@ -72,11 +116,11 @@ export default function RoomPage() {
             </div>
           </div>
         ) : view === 'draft' ? (
-          <DraftScreen emit={emit} />
+          <DraftScreen emit={broadcast} />
         ) : view === 'championship' ? (
-          <ChampionshipScreen emit={emit} />
+          <ChampionshipScreen emit={broadcast} />
         ) : (
-          <RoomScreen emit={emit} />
+          <RoomScreen emit={broadcast} />
         )}
       </main>
       <Footer />
