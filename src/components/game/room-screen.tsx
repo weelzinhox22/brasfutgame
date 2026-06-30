@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Crown, Bot, UserPlus, UserMinus, Play, Settings, Users, MessageSquare, ArrowLeft, Shield, Zap } from 'lucide-react'
+import { Send, Crown, Bot, UserPlus, UserMinus, Play, Settings, Users, MessageSquare, ArrowLeft, Shield, Zap, Activity } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,6 +45,10 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
   }
 
   const updateSettings = (patch: Partial<RoomSettings>) => {
+    // Update local state immediately for better UX
+    game.setSettings({ ...game.settings, ...patch })
+    // Also send to server
+    console.log('[updateSettings] Sending settings to server:', patch)
     emit('room:update-settings', { settings: patch })
   }
 
@@ -268,6 +272,34 @@ export function RoomScreen({ emit }: { emit: (e: string, d?: any) => void }) {
                   <p className="text-[10px] text-muted-foreground">Pular draft manual — escalações aleatórias para todos</p>
                 </div>
                 <Switch checked={game.settings.skipDraft} onCheckedChange={(v) => updateSettings({ skipDraft: v })} disabled={!isHost} />
+              </label>
+            </div>
+
+            {/* Manual match control toggle */}
+            <div className="border-t border-border/40 pt-3">
+              <label className="flex cursor-pointer items-center justify-between rounded-md border border-sky-500/30 bg-sky-500/5 p-2">
+                <div>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold">
+                    <Play className="h-3.5 w-3.5 text-sky-400" />
+                    Controle manual de partidas
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Host inicia cada partida manualmente</p>
+                </div>
+                <Switch checked={game.settings.manualMatchControl} onCheckedChange={(v) => updateSettings({ manualMatchControl: v })} disabled={!isHost} />
+              </label>
+            </div>
+
+            {/* Skip bot matches toggle */}
+            <div className="border-t border-border/40 pt-3">
+              <label className="flex cursor-pointer items-center justify-between rounded-md border border-violet-500/30 bg-violet-500/5 p-2">
+                <div>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold">
+                    <Activity className="h-3.5 w-3.5 text-violet-400" />
+                    Pular bot x bot
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">Mostrar apenas resultado de bot vs bot</p>
+                </div>
+                <Switch checked={game.settings.skipBotMatches} onCheckedChange={(v) => updateSettings({ skipBotMatches: v })} disabled={!isHost} />
               </label>
             </div>
 

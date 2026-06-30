@@ -1,18 +1,18 @@
 'use client'
 
-import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useRef, useEffect } from 'react'
+import { motion } from 'framer-motion'
 import { useRouter } from 'next/navigation'
 import { Trophy, Goal, Square, AlertTriangle, Activity, Timer, Play, Table2, ListChecks, Loader2, Crown, Medal, ChevronDown, ChevronUp, Star, Flag, LogOut, RotateCcw, ArrowRight, Circle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useUserStore } from '@/store/user-store'
 import { useGameStore } from '@/store/game-store'
 import { OvrBadge } from './badges'
 import { Confetti } from './confetti'
-import { MatchSimulationPitch } from './pitch-formation'
 import type { MatchEvent } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -31,11 +31,9 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
   const myParticipant = game.participants.find((p) => p.userId === user.id)
   const isHost = myParticipant?.isHost || false
   const [showFullTable, setShowFullTable] = useState(false)
+  const [showStandingsModal, setShowStandingsModal] = useState(false)
   const [prevStandings, setPrevStandings] = useState<typeof standings>([])
-
-  // Find home and away squads in the current game state to feed the match simulation
-  const homeSquadObj = game.squads.find((s) => (s.teamName || s.username) === currentMatch?.homeName)
-  const awaySquadObj = game.squads.find((s) => (s.teamName || s.username) === currentMatch?.awayName)
+  const [lastRoundIndex, setLastRoundIndex] = useState(-1)
 
   // Compute movements by comparing current standings to previous snapshot.
   // We update the snapshot in a transition right after rendering.
@@ -60,8 +58,32 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
     standings.forEach((s) => { movements[s.id] = 'same' })
   }
 
+  // Show standings modal when round completes
+  useEffect(() => {
+    if (championship && championship.currentRound > lastRoundIndex && lastRoundIndex >= 0) {
+      setShowStandingsModal(true)
+    }
+    if (championship) {
+      setLastRoundIndex(championship.currentRound)
+    }
+  }, [championship?.currentRound, lastRoundIndex])
+
   const startChampionship = () => {
     emit('championship:start')
+  }
+
+  const startNextMatch = () => {
+    emit('championship:start-next-match')
+  }
+
+  const advanceToNextRound = () => {
+    emit('championship:advance-round')
+  }
+
+  const handleOpenStandingsModal = () => {
+    setShowStandingsModal(true)
+    // Request standings refresh
+    emit('championship:request-standings')
   }
 
   // Ready-to-start state (after draft, before championship)
@@ -146,9 +168,35 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
     )
   }
 
+  // Waiting for host to start next match (manual control mode)
+  if (!matchTimer && !currentMatch && game.settings.manualMatchControl && championship.currentMatchIndex < (championship.schedule[championship.currentRound]?.length || 0)) {
+    const nextMatch = championship.schedule[championship.currentRound]?.[championship.currentMatchIndex]
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12">
+        <Card className="overflow-hidden">
+          <div className="pitch-bg bg-sky-500/5 p-8 text-center">
+            <Loader2 className="mx-auto h-12 w-12 animate-spin text-sky-400" />
+            <h1 className="mt-4 text-2xl font-black">Aguardando Host</h1>
+            <p className="mt-2 text-muted-foreground">
+              {nextMatch ? `Próxima partida: ${nextMatch.homeName} vs ${nextMatch.awayName}` : 'Aguardando próxima partida...'}
+            </p>
+            {isHost && (
+              <Button size="lg" className="mt-6 font-bold bg-sky-500 hover:bg-sky-600" onClick={startNextMatch}>
+                <Play className="mr-2 h-5 w-5" /> Iniciar Partida
+              </Button>
+            )}
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
   const secondsLeft = matchTimer?.secondsLeft ?? 0
   const simMinute = matchTimer?.simMinute ?? 0
   const totalRounds = championship.schedule.length
+  const currentRoundMatches = championship.schedule[championship.currentRound] || []
+  const allMatchesPlayed = championship.currentMatchIndex >= currentRoundMatches.length
+  const isLastRound = championship.currentRound >= totalRounds - 1
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
@@ -156,13 +204,79 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
         <div>
           <h1 className="text-2xl font-black tracking-tight">Campeonato</h1>
           <p className="text-sm text-muted-foreground">
-            Rodada {championship.currentRound + 1}/{totalRounds} · Partida {championship.currentMatchIndex + 1}/{championship.schedule[championship.currentRound]?.length || 0}
+            Rodada {championship.currentRound + 1}/{totalRounds} · Partida {championship.currentMatchIndex + 1}/{currentRoundMatches.length || 0}
           </p>
         </div>
-        <Badge variant="outline" className="gap-1">
-          <Activity className="h-3.5 w-3.5 text-emerald-400 animate-pulse" /> AO VIVO
-        </Badge>
+        <div className="flex gap-2">
+          <Dialog open={showStandingsModal} onOpenChange={(open) => {
+            if (open) handleOpenStandingsModal()
+            else setShowStandingsModal(false)
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <Table2 className="h-4 w-4" /> Ver Tabela
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-4xl max-h-[80vh]">
+              <DialogHeader>
+                <DialogTitle>Classificação</DialogTitle>
+              </DialogHeader>
+              <ScrollArea className="h-[60vh] pr-4">
+                {standings.length > 0 ? (
+                  <StandingsTable
+                    standings={standings}
+                    movements={movements}
+                    expanded={true}
+                    onToggle={() => {}}
+                    currentMatch={currentMatch}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full py-12">
+                    <p className="text-muted-foreground">Carregando classificação...</p>
+                  </div>
+                )}
+              </ScrollArea>
+            </DialogContent>
+          </Dialog>
+          <Badge variant="outline" className="gap-1">
+            <Activity className="h-3.5 w-3.5 text-emerald-400 animate-pulse" /> AO VIVO
+          </Badge>
+        </div>
       </div>
+
+      {/* Host controls for manual match control */}
+      {isHost && game.settings.manualMatchControl && (
+        <Card className="mb-4 border-sky-500/30 bg-sky-500/5">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-sky-300">Controle Manual de Partidas</p>
+                <p className="text-xs text-muted-foreground">
+                  {allMatchesPlayed && !isLastRound
+                    ? 'Todas as partidas desta rodada foram jogadas'
+                    : matchTimer
+                    ? 'Partida em andamento...'
+                    : championship.waitingForHost || (!currentMatch && !matchTimer)
+                    ? 'Aguardando início da próxima partida'
+                    : 'Aguardando início da próxima partida'}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {(!matchTimer && championship.waitingForHost) && (
+                  <Button size="sm" onClick={startNextMatch} className="bg-sky-500 hover:bg-sky-600">
+                    <Play className="mr-1 h-4 w-4" /> Iniciar Próxima Partida
+                  </Button>
+                )}
+                {allMatchesPlayed && !isLastRound && (
+                  <Button size="sm" onClick={advanceToNextRound} variant="outline" className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10">
+                    <ArrowRight className="mr-1 h-4 w-4" /> Avançar para Rodada {championship.currentRound + 2}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <div className="space-y-4">
@@ -227,24 +341,17 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
                   <p className="font-bold leading-tight">{currentMatch?.awayName}</p>
                 </motion.div>
               </div>
+              {/* Show "Ver Tabela" button when match ends */}
+              {!matchTimer && currentMatch && (
+                <div className="mt-4 flex justify-center">
+                  <Button variant="outline" size="sm" onClick={() => setShowStandingsModal(true)} className="gap-2">
+                    <Table2 className="h-4 w-4" /> Ver Tabela
+                  </Button>
+                </div>
+              )}
             </div>
 
-            {/* Live 11v11 Pitch Simulation */}
-            {currentMatch && homeSquadObj && awaySquadObj && (
-              <div className="p-6 pt-2 bg-[#090d16] border-t border-white/5 flex justify-center">
-                <MatchSimulationPitch
-                  homeSquad={homeSquadObj.squad}
-                  homeFormation={homeSquadObj.formation}
-                  awaySquad={awaySquadObj.squad}
-                  awayFormation={awaySquadObj.formation}
-                  events={events}
-                  simMinute={simMinute}
-                />
-              </div>
-            )}
-          </Card>
-
-          {/* Events feed */}
+          </Card>            {/* Events feed — full width since pitch was removed */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -252,40 +359,38 @@ export function ChampionshipScreen({ emit }: { emit: (e: string, d?: any) => voi
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ScrollArea className="h-[22rem] pr-2">
+              <ScrollArea className="h-[20rem] pr-2" scrollHideDelay={0}>
                 {events.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">A partida começou. Aguarde os eventos...</p>
                 ) : (
                   <div className="space-y-1.5">
-                    <AnimatePresence initial={false}>
-                      {[...events].reverse().map((e, i) => (
-                        <motion.div
-                          key={`${e.minute}-${e.type}-${i}`}
-                          initial={{ opacity: 0, x: -30, scale: 0.9 }}
-                          animate={{ opacity: 1, x: 0, scale: 1 }}
-                          exit={{ opacity: 0 }}
-                          className={cn(
-                            'flex items-center gap-3 rounded-lg border p-2.5',
-                            e.type === 'goal' ? 'border-emerald-500/50 bg-emerald-500/10' :
-                            e.type === 'red' ? 'border-rose-500/50 bg-rose-500/10' :
-                            e.type === 'yellow' ? 'border-amber-500/50 bg-amber-500/10' :
-                            'border-border/50 bg-card/30'
-                          )}
-                        >
-                          <Badge variant="outline" className="font-mono tabular-nums">{e.minute}'</Badge>
-                          <EventIcon type={e.type} />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">
-                              <span className={cn(e.team === 'home' ? 'text-emerald-300' : 'text-sky-300')}>
-                                {e.team === 'home' ? currentMatch?.homeName : currentMatch?.awayName}
-                              </span>
-                              {' — '}
-                              {eventLabel(e)}
-                            </p>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
+                    {events.filter(isImportantEvent).map((e, i) => (
+                      <motion.div
+                        key={`evt-${i}`}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.3 }}
+                        className={cn(
+                          'flex items-center gap-3 rounded-lg border p-2.5',
+                          e.type === 'goal' ? 'border-emerald-500/50 bg-emerald-500/10' :
+                          e.type === 'red' ? 'border-rose-500/50 bg-rose-500/10' :
+                          e.type === 'yellow' ? 'border-amber-500/50 bg-amber-500/10' :
+                          'border-border/50 bg-card/30'
+                        )}
+                      >
+                        <Badge variant="outline" className="font-mono tabular-nums">{e.minute}'</Badge>
+                        <EventIcon type={e.type} />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">
+                            <span className={cn(e.team === 'home' ? 'text-emerald-300' : 'text-sky-300')}>
+                              {e.team === 'home' ? currentMatch?.homeName : currentMatch?.awayName}
+                            </span>
+                            {' — '}
+                            {eventLabel(e)}
+                          </p>
+                        </div>
+                      </motion.div>
+                    ))}
                   </div>
                 )}
               </ScrollArea>
@@ -376,6 +481,21 @@ function TeamBlock({ name, ovr }: { name: string; ovr: number }) {
       {initials}
     </motion.div>
   )
+}
+
+/** Filtra apenas eventos importantes, removendo dribles, passes curtos, desarmes etc */
+function isImportantEvent(e: MatchEvent): boolean {
+  const noisyTypes = new Set([
+    'dribble',
+    'pass',
+    'tackle',
+    'interception',
+    'clearance',
+    'throw_in',
+    'long_pass',
+  ])
+  // Mostrar todos os eventos exceto os muito frequentes
+  return !noisyTypes.has(e.type)
 }
 
 function EventIcon({ type }: { type: string }) {
@@ -681,6 +801,18 @@ function ChampionScreen({
       </div>
     </div>
   )
+}
+
+/** Auto-scrolls the events feed to the bottom when new events arrive */
+function ScrollAnchor() {
+  const ref = useRef<HTMLDivElement>(null)
+  const events = useGameStore((s) => s.matchEvents)
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+  }, [events.length])
+  return <div ref={ref} />
 }
 
 function PodiumCard({ standing, place, height, delay }: { standing: any; place: number; height: string; delay: number }) {

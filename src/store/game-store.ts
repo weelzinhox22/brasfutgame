@@ -62,6 +62,7 @@ export interface ChampionshipStateUI {
   currentRoundMatches: { round: number; homeId: string; awayId: string; homeName: string; awayName: string }[]
   timer: { secondsLeft: number; total: number } | null
   finished: boolean
+  waitingForHost?: boolean
   topScorers?: { player: string; team: string; goals: number }[]
 }
 
@@ -142,6 +143,9 @@ const initialState = {
     competitionFormat: 'custom' as const,
     hideOvr: false,
     privatePicks: false,
+    skipDraft: false,
+    manualMatchControl: false,
+    skipBotMatches: false,
   } as RoomSettings,
   status: 'waiting' as const,
   participants: [] as RoomParticipant[],
@@ -167,7 +171,7 @@ export const useGameStore = create<GameStore>((set) => ({
   setDraft: (d) => set({ draft: d }),
   setChampionship: (c) => set({ championship: c }),
   setStandings: (s) => set({ standings: s }),
-  addMatchEvent: (e) => set((st) => ({ matchEvents: [...st.matchEvents, e].slice(-100) })),
+  addMatchEvent: (e) => set((st) => ({ matchEvents: [...st.matchEvents, e].slice(-500) })),
   setLastEventIndex: (i) => set({ lastEventIndex: i }),
   setMatchTimer: (t) =>
     set((st) => ({

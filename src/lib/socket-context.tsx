@@ -129,6 +129,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
           awayScore: 0,
         })
         game.setMatchTimer({ secondsLeft: payload.totalSeconds, simMinute: 0 })
+        // Reset waiting for host state
+        const ch = game.championship
+        if (ch && ch.waitingForHost) {
+          game.setChampionship({ ...ch, waitingForHost: false })
+        }
       },
       'championship:match-tick': (payload) => {
         useGameStore.getState().setMatchTimer(payload)
@@ -153,6 +158,21 @@ export function SocketProvider({ children }: { children: ReactNode }) {
             awayScore: payload.awayScore,
           })
         }
+        // If this was a skipped bot match, clear the current match after showing result
+        if (payload.skipped) {
+          setTimeout(() => {
+            useGameStore.getState().setCurrentMatch(null)
+          }, 3000)
+        }
+      },
+      'championship:waiting-host': (payload) => {
+        // Clear current match to show waiting state
+        useGameStore.getState().setCurrentMatch(null)
+        useGameStore.getState().setMatchTimer(null)
+        // Set waiting for host state
+        const game = useGameStore.getState()
+        if (!game.championship) return
+        game.setChampionship({ ...game.championship, waitingForHost: true })
       },
       'championship:standings-updated': (payload) => {
         useGameStore.getState().setStandings(payload)

@@ -134,6 +134,11 @@ async function loadRoomFromSupabase(room: Party.Room, code: string): Promise<Act
   );
 
   const settings = { ...DEFAULT_SETTINGS, ...JSON.parse(dbRoom.settings || "{}") };
+  console.log(`[loadRoomFromSupabase] Loaded settings for room ${code}:`, settings);
+
+  // Ensure new settings exist for old rooms
+  if (settings.manualMatchControl === undefined) settings.manualMatchControl = false;
+  if (settings.skipBotMatches === undefined) settings.skipBotMatches = false;
 
   const participants: ParticipantState[] = dbParticipants.map((p: any) => ({
     id: p.id,
@@ -174,6 +179,16 @@ export default class ChampionshipServer implements Party.Server {
   matchInterval: any = null;
 
   constructor(readonly room: Party.Room) {}
+
+  async onStart() {
+    console.log(`[party] server started for room: ${this.room.id}`);
+    // Pre-load state if possible
+    const code = this.room.id.toUpperCase();
+    this.state = await loadRoomFromSupabase(this.room, code);
+    if (this.state) {
+      console.log(`[onStart] Loaded state for room ${code}, manualMatchControl: ${this.state.settings.manualMatchControl}`);
+    }
+  }
 
   async onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
     console.log(`[party] client connected: ${conn.id} in room: ${this.room.id}`);
@@ -324,11 +339,19 @@ export default class ChampionshipServer implements Party.Server {
           return;
         }
         this.state.settings = { ...this.state.settings, ...data.settings };
-        await supabase
+        console.log(`[room:update-settings] Updated settings:`, this.state.settings);
+        const { error } = await supabase
           .from("Room")
           .update({ settings: JSON.stringify(this.state.settings) })
           .eq("id", this.state.roomId);
 
+        if (error) {
+          console.error(`[room:update-settings] Error saving settings:`, error);
+          sender.send(JSON.stringify({ type: "room:error", payload: { message: "Erro ao salvar configurações." } }));
+          return;
+        }
+
+        console.log(`[room:update-settings] Settings saved successfully`);
         this.room.broadcast(JSON.stringify({ type: "room:settings-updated", payload: { settings: this.state.settings } }));
         this.broadcastRoomState();
       }
@@ -458,6 +481,7 @@ export default class ChampionshipServer implements Party.Server {
           sender.send(JSON.stringify({ type: "room:error", payload: { message: "Conclua o draft primeiro." } }));
           return;
         }
+        console.log(`[championship:start] Starting championship with manualMatchControl: ${this.state.settings.manualMatchControl}`);
         await this.startChampionship();
       }
 
@@ -471,7 +495,7 @@ export default class ChampionshipServer implements Party.Server {
         this.state.draft = null;
         this.state.championship = null;
         this.state.champion = null;
-        
+
         // Reset squads, cards, and formations
         for (const p of this.state.participants) {
           p.squad = [];
@@ -481,15 +505,37 @@ export default class ChampionshipServer implements Party.Server {
           (p as any).yellowCards = {};
           (p as any).suspendedPlayers = [];
         }
-        
+
         // Save status in DB
         await supabase
           .from("Room")
           .update({ status: "waiting" })
           .eq("id", this.state.roomId);
-          
+
         this.room.broadcast(JSON.stringify({ type: "room:status-changed", payload: { status: "waiting" } }));
         this.broadcastRoomState();
+      }
+
+      if (type === "championship:start-next-match") {
+        if (!participant.isHost) return;
+        if (!this.state.championship) return;
+        await this.playNextMatch();
+      }
+
+      if (type === "championship:advance-round") {
+        if (!participant.isHost) return;
+        if (!this.state.championship) return;
+        const c = this.state.championship;
+        c.currentRound++;
+        c.currentMatchIndex = 0;
+        this.room.broadcast(JSON.stringify({ type: "championship:state", payload: this.publicChampionshipState() }));
+        this.broadcastRoomState();
+      }
+
+      if (type === "championship:request-standings") {
+        if (!this.state.championship) return;
+        const standings = await this.fetchStandings();
+        this.room.broadcast(JSON.stringify({ type: "championship:standings-updated", payload: standings }));
       }
     } catch (err: any) {
       console.error("[party error]", err);
@@ -1106,15 +1152,29 @@ export default class ChampionshipServer implements Party.Server {
           .maybeSingle();
 
         if (!existing) {
-          await supabase.from("ChampionshipStanding").insert({
+          console.log(`[startChampionship] Creating standing for participant ${p.id} (${p.teamName || p.username})`);
+          const { error } = await supabase.from("ChampionshipStanding").insert({
             id: crypto.randomUUID(),
             roomId: this.state.roomId,
             participantId: p.id,
             name: p.teamName || p.username,
           });
+          if (error) {
+            console.error(`[startChampionship] Error creating standing for ${p.id}:`, error);
+          } else {
+            console.log(`[startChampionship] Successfully created standing for ${p.id}`);
+          }
+        } else {
+          console.log(`[startChampionship] Standing already exists for ${p.id}`);
         }
+      } else {
+        console.log(`[startChampionship] Skipping ${p.id} - squad length: ${p.squad.length}`);
       }
     }
+
+    // Fetch and broadcast initial standings
+    const initialStandings = await this.fetchStandings();
+    this.room.broadcast(JSON.stringify({ type: "championship:standings-updated", payload: initialStandings }));
 
     const msg = this.systemMessage(`Campeonato iniciado! ${fullSchedule.length} rodada(s) programadas.`);
     await this.pushChat(msg);
@@ -1123,7 +1183,15 @@ export default class ChampionshipServer implements Party.Server {
     this.room.broadcast(JSON.stringify({ type: "championship:state", payload: this.publicChampionshipState() }));
     this.broadcastRoomState();
 
-    await this.playNextMatch();
+    // Only auto-play first match if manual control is disabled
+    console.log(`[startChampionship] manualMatchControl: ${this.state.settings.manualMatchControl}, type: ${typeof this.state.settings.manualMatchControl}`);
+    if (!this.state.settings.manualMatchControl) {
+      await this.playNextMatch();
+    } else {
+      // Broadcast that we're waiting for host to start first match
+      console.log(`[startChampionship] Broadcasting waiting-host for first match`);
+      this.room.broadcast(JSON.stringify({ type: "championship:waiting-host", payload: {} }));
+    }
   }
 
   publicChampionshipState() {
@@ -1156,7 +1224,13 @@ export default class ChampionshipServer implements Party.Server {
       this.room.broadcast(JSON.stringify({ type: "championship:round-complete", payload: { round: c.currentRound + 1 } }));
       c.currentRound++;
       c.currentMatchIndex = 0;
-      await this.playNextMatch();
+      // Only auto-play next round if manual control is disabled
+      if (!this.state.settings.manualMatchControl) {
+        await this.playNextMatch();
+      } else {
+        // Broadcast that we're waiting for host to start next round
+        this.room.broadcast(JSON.stringify({ type: "championship:waiting-host", payload: {} }));
+      }
       return;
     }
 
@@ -1166,13 +1240,52 @@ export default class ChampionshipServer implements Party.Server {
 
     if (!home || !away) {
       c.currentMatchIndex++;
-      await this.playNextMatch();
+      // Only auto-play next match if manual control is disabled
+      if (!this.state.settings.manualMatchControl) {
+        await this.playNextMatch();
+      } else {
+        // Broadcast that we're waiting for host to start next match
+        this.room.broadcast(JSON.stringify({ type: "championship:waiting-host", payload: {} }));
+      }
+      return;
+    }
+
+    // Check if this is a bot vs bot match and skip is enabled
+    const isBotVsBot = home.isBot && away.isBot;
+    const shouldSkip = this.state.settings.skipBotMatches && isBotVsBot;
+
+    if (shouldSkip) {
+      // Calculate result based on OVR with randomness
+      const result = this.calculateBotMatchResult(home, away);
+      await this.finishSkippedMatch(home, away, result);
+      return;
+    }
+
+    // If manual match control is enabled, don't auto-play
+    if (this.state.settings.manualMatchControl) {
+      // Broadcast that we're waiting for host to start
+      this.room.broadcast(
+        JSON.stringify({
+          type: "championship:waiting-host",
+          payload: {
+            homeName: home.teamName || home.username,
+            awayName: away.teamName || away.username,
+            homeOvr: home.teamOvr,
+            awayOvr: away.teamOvr,
+            round: c.currentRound + 1,
+          },
+        })
+      );
       return;
     }
 
     // Filter out suspended players from starting XI
     const activeHomeSquad = home.squad.filter((p) => !(home as any).suspendedPlayers?.includes(p.id));
     const activeAwaySquad = away.squad.filter((p) => !(away as any).suspendedPlayers?.includes(p.id));
+
+    // Track players sent off during this match
+    const homeSentOff: Set<string> = new Set();
+    const awaySentOff: Set<string> = new Set();
 
     const homeTeam: TeamForSim = {
       name: home.teamName || home.username,
@@ -1191,6 +1304,23 @@ export default class ChampionshipServer implements Party.Server {
 
     const result = simulateMatch(homeTeam, awayTeam, Date.now() + c.currentRound * 1000 + c.currentMatchIndex);
 
+    // Filter out cards for players who already got red card in this match
+    const filteredEvents = result.events.filter((e: any) => {
+      if (e.type === 'yellow' || e.type === 'red') {
+        const sentOffSet = e.team === 'home' ? homeSentOff : awaySentOff;
+        return !sentOffSet.has(e.player);
+      }
+      return true;
+    });
+
+    // Track sent off players
+    filteredEvents.forEach((e: any) => {
+      if (e.type === 'red') {
+        const sentOffSet = e.team === 'home' ? homeSentOff : awaySentOff;
+        sentOffSet.add(e.player);
+      }
+    });
+
     // Events already have ball positions embedded from the simulation engine.
     // All clients receive the EXACT same events for synchronized rendering.
     c.pendingResult = {
@@ -1200,7 +1330,7 @@ export default class ChampionshipServer implements Party.Server {
       awayName: away.teamName || away.username,
       homeScore: result.homeScore,
       awayScore: result.awayScore,
-      events: enrichedEvents,
+      events: filteredEvents,
       streamedUpTo: 0,
     };
 
@@ -1227,6 +1357,116 @@ export default class ChampionshipServer implements Party.Server {
     // Setup match ticking interval
     if (this.matchInterval) clearInterval(this.matchInterval);
     this.matchInterval = setInterval(() => this.onMatchTick(), 1000);
+  }
+
+  /**
+   * Calculate bot vs bot match result based on team OVR with randomness
+   * Higher OVR team has advantage but randomness allows upsets
+   */
+  calculateBotMatchResult(home: ParticipantState, away: ParticipantState): { homeScore: number; awayScore: number; events: MatchEvent[] } {
+    const homeOvr = home.teamOvr;
+    const awayOvr = away.teamOvr;
+    const ovrDiff = homeOvr - awayOvr;
+
+    // Base probability for home team to win (0.5 = 50% when equal OVR)
+    // Each OVR point difference adds ~2% to win probability
+    let homeWinProb = 0.5 + (ovrDiff * 0.02);
+    homeWinProb = Math.max(0.1, Math.min(0.9, homeWinProb)); // Clamp between 10% and 90%
+
+    const rng = Math.random();
+    let homeScore = 0;
+    let awayScore = 0;
+
+    // Determine match outcome
+    if (rng < homeWinProb) {
+      // Home wins
+      homeScore = Math.floor(Math.random() * 3) + 1; // 1-3 goals
+      awayScore = Math.floor(Math.random() * 2); // 0-1 goals
+    } else if (rng < homeWinProb + 0.25) {
+      // Draw
+      homeScore = Math.floor(Math.random() * 2);
+      awayScore = homeScore;
+    } else {
+      // Away wins
+      awayScore = Math.floor(Math.random() * 3) + 1; // 1-3 goals
+      homeScore = Math.floor(Math.random() * 2); // 0-1 goals
+    }
+
+    // Add some randomness to goal counts (occasional high-scoring games)
+    if (Math.random() < 0.1) {
+      homeScore += Math.floor(Math.random() * 2);
+      awayScore += Math.floor(Math.random() * 2);
+    }
+
+    // Generate minimal events for result tracking
+    const events: MatchEvent[] = [
+      { minute: 0, type: 'kickoff', team: 'home', player: '—', ballX: 50, ballY: 50, detail: 'Partida iniciada' },
+      { minute: 90, type: 'match_end', team: 'home', player: '—', ballX: 50, ballY: 50, detail: 'Fim de partida' },
+    ];
+
+    return { homeScore, awayScore, events };
+  }
+
+  /**
+   * Finish a skipped bot vs bot match by directly updating standings
+   */
+  async finishSkippedMatch(home: ParticipantState, away: ParticipantState, result: { homeScore: number; awayScore: number; events: MatchEvent[] }) {
+    const c = this.state!.championship!;
+
+    // Broadcast the result immediately
+    this.room.broadcast(
+      JSON.stringify({
+        type: "championship:match-result",
+        payload: {
+          homeName: home.teamName || home.username,
+          awayName: away.teamName || away.username,
+          homeScore: result.homeScore,
+          awayScore: result.awayScore,
+          skipped: true,
+        },
+      })
+    );
+
+    const msg = this.systemMessage(`Resultado (Bot x Bot): ${home.teamName || home.username} ${result.homeScore} x ${result.awayScore} ${away.teamName || away.username}`);
+    await this.pushChat(msg);
+
+    // Update standings
+    await this.updateStanding(home.id, result.homeScore, result.awayScore);
+    await this.updateStanding(away.id, result.awayScore, result.homeScore);
+
+    // Save match to database
+    const supabase = getSupabase(this.room);
+    await supabase.from("Match").insert({
+      id: crypto.randomUUID(),
+      roomId: this.state!.roomId,
+      round: c.currentRound + 1,
+      homeParticipantId: home.id,
+      awayParticipantId: away.id,
+      homeName: home.teamName || home.username,
+      awayName: away.teamName || away.username,
+      homeOvr: home.teamOvr,
+      awayOvr: away.teamOvr,
+      homeScore: result.homeScore,
+      awayScore: result.awayScore,
+      events: JSON.stringify(result.events),
+      stats: "{}",
+      played: true,
+      playedAt: new Date().toISOString(),
+    });
+
+    const standings = await this.fetchStandings();
+    this.room.broadcast(JSON.stringify({ type: "championship:standings-updated", payload: standings }));
+    this.room.broadcast(JSON.stringify({ type: "championship:state", payload: this.publicChampionshipState() }));
+
+    c.currentMatchIndex++;
+
+    // Only auto-play next match if manual control is disabled
+    if (!this.state!.settings.manualMatchControl) {
+      setTimeout(() => this.playNextMatch(), 500);
+    } else {
+      // Broadcast that we're waiting for host to start next match
+      this.room.broadcast(JSON.stringify({ type: "championship:waiting-host", payload: {} }));
+    }
   }
 
   async onMatchTick() {
@@ -1369,7 +1609,13 @@ export default class ChampionshipServer implements Party.Server {
     c.pendingResult = null;
     c.currentMatchIndex++;
 
-    setTimeout(() => this.playNextMatch(), 2500);
+    // Only auto-play next match if manual control is disabled
+    if (!this.state.settings.manualMatchControl) {
+      setTimeout(() => this.playNextMatch(), 2500);
+    } else {
+      // Broadcast that we're waiting for host to start next match
+      this.room.broadcast(JSON.stringify({ type: "championship:waiting-host", payload: {} }));
+    }
   }
 
   async updateStanding(participantId: string, gf: number, ga: number) {
@@ -1412,6 +1658,11 @@ export default class ChampionshipServer implements Party.Server {
       .from("ChampionshipStanding")
       .select("*")
       .eq("roomId", this.state.roomId);
+
+    console.log(`[fetchStandings] Fetched ${standings?.length || 0} standings for room ${this.state.roomId}`);
+    if (standings) {
+      console.log(`[fetchStandings] Standings data:`, standings);
+    }
 
     if (!standings) return [];
 
